@@ -27,10 +27,15 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────────────────────
-# CSS مخصص
+# CSS مخصص (إخفاء القوائم + التنسيق)
 # ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+/* إخفاء قائمة Streamlit والعلامة المائية */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+
 @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
 *, *::before, *::after { font-family: 'Tajawal', sans-serif !important; }
 .stApp { background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%); }
@@ -340,11 +345,15 @@ with st.sidebar:
         options=["سهل جداً","سهل","متوسط","صعب","مستوى بكالوريا"])
 
     model_name = st.selectbox("🤖 النموذج",
-        ["llama-3.3-70b-specdec","llama3-70b-8192",
-         "mixtral-8x7b-32768","gemma2-9b-it"])
+        ["llama-3.3-70b-versatile","llama-3.1-70b-versatile",
+         "llama3-70b-8192","mixtral-8x7b-32768"])
 
     st.markdown("---")
-    st.success("✅ مفتاح API متاح") if api_key else st.error("❌ GROQ_API_KEY غير موجود في .env")
+    # إصلاح ظهور الرسائل التقنية
+    if api_key:
+        st.success("✅ مفتاح API متاح")
+    else:
+        st.error("❌ GROQ_API_KEY غير موجود")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -370,7 +379,7 @@ with tab_gen:
 
     if st.button("🚀 توليد التمرين والحل التفصيلي"):
         if not api_key:
-            st.error("⚠️ مفتاح GROQ_API_KEY غير موجود في ملف .env")
+            st.error("⚠️ مفتاح GROQ_API_KEY غير موجود")
         elif not lesson.strip():
             st.warning("⚠️ الرجاء إدخال عنوان الدرس")
         else:
@@ -407,108 +416,3 @@ with tab_gen:
 ## كود LaTeX الكامل
 ```latex
 [الكود الجاهز للطباعة]
-```
----
-"""
-            with st.spinner("🧠 جاري التواصل مع الذكاء الاصطناعي…"):
-                try:
-                    response = llm.invoke(prompt)
-                    res_text = response.content
-
-                    st.markdown(f"""
-                    <div style="background:rgba(102,126,234,.12);border:1px solid rgba(102,126,234,.35);
-                    border-radius:10px;padding:.9rem 1.2rem;direction:rtl;text-align:right;margin-bottom:1rem;">
-                        <strong>📋 {ex_type} | {subject} | {grade}{branch_txt} | ⚡ {difficulty}</strong>
-                    </div>""", unsafe_allow_html=True)
-
-                    render_with_latex(res_text)
-
-                    save_exercise(level, grade, branch or "", subject,
-                                  lesson, ex_type, difficulty, res_text)
-                    st.success("✅ تم حفظ التمرين في قاعدة البيانات")
-
-                    dc1, dc2 = st.columns(2)
-                    with dc1:
-                        st.download_button("📥 تحميل نص",
-                            data=res_text.encode("utf-8-sig"),
-                            file_name=f"{lesson}_{grade}.txt",
-                            mime="text/plain")
-                    with dc2:
-                        try:
-                            pdf_bytes = generate_pdf(res_text, lesson)
-                            st.download_button("📄 تحميل PDF",
-                                data=pdf_bytes,
-                                file_name=f"{lesson}_{grade}.pdf",
-                                mime="application/pdf")
-                        except Exception as e:
-                            st.warning(f"⚠️ PDF غير متاح: {e}")
-
-                except Exception as err:
-                    st.error(f"❌ خطأ: {err}")
-
-
-# ══════════════════════════════════════════════════
-# تبويب 2 – قاعدة البيانات
-# ══════════════════════════════════════════════════
-with tab_db:
-    st.markdown("### 🗄️ التمارين المحفوظة")
-    search_q  = st.text_input("🔍 بحث:", placeholder="ابحث بعنوان الدرس أو المادة…")
-    exercises = get_exercises(search_q)
-
-    if not exercises:
-        st.info("لا توجد تمارين محفوظة بعد.")
-    else:
-        st.caption(f"عدد النتائج: {len(exercises)}")
-        for ex in exercises:
-            ex_id, lv, gr, br, sub, les, xt, diff, cont, created = ex
-            with st.expander(f"📚 {les}  |  {sub}  |  {gr}  |  {diff}  |  🕒 {created}"):
-                st.markdown(
-                    f'<div class="result-box">{cont[:600]}…</div>',
-                    unsafe_allow_html=True)
-                ba, bb, bc = st.columns(3)
-                with ba:
-                    st.download_button("📥 نص", data=cont.encode("utf-8-sig"),
-                        file_name=f"{les}.txt", key=f"dl_{ex_id}")
-                with bb:
-                    try:
-                        pdf_b = generate_pdf(cont, les)
-                        st.download_button("📄 PDF", data=pdf_b,
-                            file_name=f"{les}.pdf", mime="application/pdf",
-                            key=f"pdf_{ex_id}")
-                    except Exception:
-                        pass
-                with bc:
-                    if st.button("🗑️ حذف", key=f"del_{ex_id}"):
-                        delete_exercise(ex_id); st.rerun()
-
-
-# ══════════════════════════════════════════════════
-# تبويب 3 – إحصائيات
-# ══════════════════════════════════════════════════
-with tab_stats:
-    total, subj_count, lvl_count = get_stats()
-    st.markdown("### 📊 إحصائيات الاستخدام")
-    s1, s2, s3 = st.columns(3)
-    for col, val, label, clr in [
-        (s1, total,      "إجمالي التمارين",    "#667eea"),
-        (s2, subj_count, "المواد المختلفة",    "#764ba2"),
-        (s3, lvl_count,  "الأطوار التعليمية", "#f093fb"),
-    ]:
-        with col:
-            st.markdown(f"""
-            <div class="stat-card">
-                <h2 style="color:{clr}">{val}</h2>
-                <p>{label}</p>
-            </div>""", unsafe_allow_html=True)
-
-    last = get_exercises()[:8]
-    if last:
-        st.markdown("### 📋 آخر التمارين المولّدة")
-        for ex in last:
-            ex_id, lv, gr, br, sub, les, xt, diff, cont, created = ex
-            st.markdown(
-                f'<div class="db-item"><strong>{les}</strong>'
-                f' &nbsp;|&nbsp; {sub} &nbsp;|&nbsp; {gr}'
-                f' &nbsp;|&nbsp; <span style="color:#a78bfa">{diff}</span>'
-                f' &nbsp;|&nbsp; <small style="opacity:.7">{created}</small></div>',
-                unsafe_allow_html=True)
