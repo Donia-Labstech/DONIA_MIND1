@@ -397,19 +397,23 @@ with tab_ex:
     c1, c2, c3 = st.columns([4, 1, 1])
     with c1:
         lesson = st.text_input("📝 عنوان الدرس:",
-            placeholder="مثال: الانقسام المنصف، المعادلات التفاضلية…")
+            placeholder="مثال: الانقسام المنصف، المعادلات التفاضلية…",
+            key="ex_lesson")
     with c2:
-        num_ex = st.number_input("عدد التمارين", 1, 5, 1)
+        num_ex = st.number_input("عدد التمارين", 1, 5, 1, key="ex_num")
     with c3:
         ex_type = st.selectbox("النوع",
-            ["تمرين تطبيقي","مسألة","سؤال إشكالي","فرض محروس","اختبار فصلي"])
+            ["تمرين تطبيقي","مسألة","سؤال إشكالي","فرض محروس","اختبار فصلي"],
+            key="ex_type")
     difficulty = st.select_slider("⚡ مستوى الصعوبة",
-        options=["سهل جداً","سهل","متوسط","صعب","مستوى بكالوريا"])
-    extra = st.text_area("📌 تعليمات إضافية:", placeholder="أي توجيهات خاصة…")
+        options=["سهل جداً","سهل","متوسط","صعب","مستوى بكالوريا"],
+        key="ex_difficulty")
+    extra = st.text_area("📌 تعليمات إضافية:", placeholder="أي توجيهات خاصة…",
+        key="ex_extra")
 
     col_btn, col_save = st.columns([3,1])
     with col_btn:
-        gen_btn = st.button("🚀 توليد التمرين والحل التفصيلي")
+        gen_btn = st.button("🚀 توليد التمرين والحل التفصيلي", key="btn_gen_ex")
 
     if gen_btn:
         if not api_key:
@@ -458,14 +462,15 @@ with tab_ex:
                     d1, d2, d3 = st.columns(3)
                     with d1:
                         st.download_button("📥 تحميل نص", res_text.encode("utf-8-sig"),
-                                           f"{lesson}.txt", "text/plain")
+                                           f"{lesson}.txt", "text/plain", key="dl_ex_txt")
                     with d2:
                         pdf_b = generate_pdf(res_text, lesson, f"{subject} | {grade}")
-                        st.download_button("📄 تحميل PDF", pdf_b, f"{lesson}.pdf", "application/pdf")
+                        st.download_button("📄 تحميل PDF", pdf_b, f"{lesson}.pdf",
+                                           "application/pdf", key="dl_ex_pdf")
                     with d3:
                         # Google Drive upload
                         if drive_json and drive_json.strip().startswith("{"):
-                            if st.button("☁️ رفع إلى Drive"):
+                            if st.button("☁️ رفع إلى Drive", key="btn_drive_ex"):
                                 try:
                                     creds = json.loads(drive_json)
                                     link = upload_to_drive(pdf_b, f"{lesson}.pdf", creds)
@@ -500,15 +505,19 @@ with tab_plan:
 
     pm1, pm2 = st.columns(2)
     with pm1:
-        lesson_plan = st.text_input("📝 عنوان الدرس:", placeholder="مثال: الدالة الأسية…")
-        duration    = st.selectbox("⏱️ مدة الحصة", ["50 دقيقة","1 ساعة","1.5 ساعة","2 ساعة"])
+        lesson_plan = st.text_input("📝 عنوان الدرس:", placeholder="مثال: الدالة الأسية…",
+                                     key="plan_lesson")
+        duration    = st.selectbox("⏱️ مدة الحصة", ["50 دقيقة","1 ساعة","1.5 ساعة","2 ساعة"],
+                                    key="plan_duration")
     with pm2:
-        session_type = st.selectbox("نوع الحصة", ["درس نظري","أعمال موجهة","أعمال تطبيقية","تقييم تشخيصي"])
-        objectives_count = st.slider("عدد الأهداف التعلمية", 2, 6, 3)
+        session_type = st.selectbox("نوع الحصة", ["درس نظري","أعمال موجهة","أعمال تطبيقية","تقييم تشخيصي"],
+                                     key="plan_session_type")
+        objectives_count = st.slider("عدد الأهداف التعلمية", 2, 6, 3, key="plan_objectives")
 
-    plan_notes = st.text_area("ملاحظات خاصة للمذكرة:", placeholder="مثلاً: الفوج يضم تلاميذ ضعاف، التركيز على الجانب التطبيقي…")
+    plan_notes = st.text_area("ملاحظات خاصة للمذكرة:", placeholder="مثلاً: الفوج يضم تلاميذ ضعاف، التركيز على الجانب التطبيقي…",
+                               key="plan_notes")
 
-    if st.button("📝 توليد المذكرة الكاملة"):
+    if st.button("📝 توليد المذكرة الكاملة", key="btn_gen_plan"):
         if not api_key:
             st.error("⚠️ أضف GROQ_API_KEY")
         elif not lesson_plan.strip():
@@ -586,11 +595,12 @@ with tab_plan:
                     d1, d2 = st.columns(2)
                     with d1:
                         st.download_button("📥 تحميل المذكرة (نص)", plan_text.encode("utf-8-sig"),
-                                           f"مذكرة_{lesson_plan}.txt")
+                                           f"مذكرة_{lesson_plan}.txt", key="dl_plan_txt")
                     with d2:
                         pdf_p = generate_pdf(plan_text, f"مذكرة درس: {lesson_plan}", f"{subject} | {grade}")
                         st.download_button("📄 تحميل المذكرة (PDF)", pdf_p,
-                                           f"مذكرة_{lesson_plan}.pdf", "application/pdf")
+                                           f"مذكرة_{lesson_plan}.pdf", "application/pdf",
+                                           key="dl_plan_pdf")
                 except Exception as err:
                     st.markdown(f'<div class="error-box">❌ {err}</div>', unsafe_allow_html=True)
 
@@ -600,23 +610,27 @@ with tab_plan:
 with tab_correct:
     st.markdown("### ✅ تصحيح الأوراق وتحليل الإجابات")
 
-    correct_mode = st.radio("وضع التصحيح:", ["📝 إدخال نصي","🖼️ رفع صورة ورقة الطالب"], horizontal=True)
+    correct_mode = st.radio("وضع التصحيح:", ["📝 إدخال نصي","🖼️ رفع صورة ورقة الطالب"],
+                             horizontal=True, key="correct_mode")
 
     cc1, cc2 = st.columns(2)
     with cc1:
-        student_name = st.text_input("اسم الطالب:", placeholder="اختياري")
-        exam_subject = st.text_input("المادة / الموضوع:", value=subject)
+        student_name = st.text_input("اسم الطالب:", placeholder="اختياري", key="corr_name")
+        exam_subject = st.text_input("المادة / الموضوع:", value=subject, key="corr_subject")
     with cc2:
-        total_marks = st.number_input("العلامة الكاملة:", 10, 100, 20)
+        total_marks = st.number_input("العلامة الكاملة:", 10, 100, 20, key="corr_total")
         correct_style = st.selectbox("أسلوب التصحيح:",
-            ["تصحيح شامل مع تعليقات","تصحيح مختصر","تحديد الأخطاء فقط","مقارنة مع الحل النموذجي"])
+            ["تصحيح شامل مع تعليقات","تصحيح مختصر","تحديد الأخطاء فقط","مقارنة مع الحل النموذجي"],
+            key="corr_style")
 
     if correct_mode == "📝 إدخال نصي":
         model_answer = st.text_area("✍️ الحل النموذجي / السؤال:", height=150,
-                                     placeholder="أدخل السؤال أو الحل النموذجي…")
+                                     placeholder="أدخل السؤال أو الحل النموذجي…",
+                                     key="corr_model_ans")
         student_answer = st.text_area("📄 إجابة الطالب:", height=150,
-                                       placeholder="انسخ إجابة الطالب هنا…")
-        correct_btn = st.button("✅ تصحيح الإجابة")
+                                       placeholder="انسخ إجابة الطالب هنا…",
+                                       key="corr_student_ans")
+        correct_btn = st.button("✅ تصحيح الإجابة", key="btn_correct")
         if correct_btn:
             if not api_key:
                 st.error("⚠️ أضف GROQ_API_KEY")
@@ -662,18 +676,21 @@ with tab_correct:
 
                         pdf_c = generate_pdf(correction, f"تصحيح: {student_name or 'طالب'}", exam_subject)
                         st.download_button("📄 تحميل التصحيح PDF", pdf_c,
-                                           f"تصحيح_{student_name or 'طالب'}.pdf", "application/pdf")
+                                           f"تصحيح_{student_name or 'طالب'}.pdf", "application/pdf",
+                                           key="dl_corr_pdf")
                     except Exception as err:
                         st.markdown(f'<div class="error-box">❌ {err}</div>', unsafe_allow_html=True)
 
     else:  # Image mode
-        uploaded_img = st.file_uploader("📸 ارفع صورة ورقة الطالب:", type=["jpg","jpeg","png"])
+        uploaded_img = st.file_uploader("📸 ارفع صورة ورقة الطالب:", type=["jpg","jpeg","png"],
+                                         key="corr_img_upload")
         if uploaded_img:
             img = Image.open(uploaded_img)
             st.image(img, caption="ورقة الطالب", width=400)
-            extra_instructions = st.text_area("تعليمات إضافية:", placeholder="مثلاً: السؤال كان عن…")
+            extra_instructions = st.text_area("تعليمات إضافية:", placeholder="مثلاً: السؤال كان عن…",
+                                               key="corr_img_extra")
 
-            if st.button("✅ تصحيح الورقة بالذكاء الاصطناعي"):
+            if st.button("✅ تصحيح الورقة بالذكاء الاصطناعي", key="btn_correct_img"):
                 if not api_key:
                     st.error("⚠️ أضف GROQ_API_KEY")
                 else:
@@ -702,16 +719,17 @@ with tab_correct:
 with tab_analyze:
     st.markdown("### 📊 تحليل نتائج الفوج")
 
-    analyze_mode = st.radio("مصدر البيانات:", ["📋 إدخال يدوي","📁 رفع ملف CSV","📂 من قاعدة التصحيحات"], horizontal=True)
+    analyze_mode = st.radio("مصدر البيانات:", ["📋 إدخال يدوي","📁 رفع ملف CSV","📂 من قاعدة التصحيحات"],
+                             horizontal=True, key="analyze_mode")
 
     if analyze_mode == "📋 إدخال يدوي":
         st.markdown("**أدخل علامات التلاميذ (اسم, علامة) – سطر لكل تلميذ:**")
         grades_input = st.text_area("",
             placeholder="أحمد, 15\nفاطمة, 18\nعلي, 12\nسارة, 9\nمحمد, 14",
-            height=200)
-        total_an = st.number_input("العلامة الكاملة:", 10, 100, 20)
+            height=200, key="analyze_grades_input")
+        total_an = st.number_input("العلامة الكاملة:", 10, 100, 20, key="analyze_total")
 
-        if st.button("📊 تحليل النتائج"):
+        if st.button("📊 تحليل النتائج", key="btn_analyze"):
             if not grades_input.strip():
                 st.warning("أدخل البيانات أولاً")
             else:
@@ -774,7 +792,7 @@ with tab_analyze:
                                  use_container_width=True)
 
                     # AI Analysis
-                    if api_key and st.button("🤖 تحليل ذكي للنتائج"):
+                    if api_key and st.button("🤖 تحليل ذكي للنتائج", key="btn_ai_analyze"):
                         summary = df.to_string(index=False)
                         prompt_an = f"""أنت مستشار بيداغوجي جزائري. حلّل نتائج الفوج التالية:
 {summary}
@@ -795,12 +813,14 @@ with tab_analyze:
                                 render_with_latex(analysis)
                                 pdf_an = generate_pdf(analysis, "تحليل النتائج", subject)
                                 st.download_button("📄 تصدير التقرير PDF", pdf_an,
-                                                   "تحليل_النتائج.pdf", "application/pdf")
+                                                   "تحليل_النتائج.pdf", "application/pdf",
+                                                   key="dl_analyze_pdf")
                             except Exception as e:
                                 st.error(str(e))
 
     elif analyze_mode == "📁 رفع ملف CSV":
-        csv_file = st.file_uploader("📁 ارفع ملف CSV (الاسم, العلامة):", type=["csv"])
+        csv_file = st.file_uploader("📁 ارفع ملف CSV (الاسم, العلامة):", type=["csv"],
+                                     key="analyze_csv_upload")
         if csv_file:
             try:
                 df_csv = pd.read_csv(csv_file)
@@ -832,7 +852,7 @@ with tab_db:
     arch_tab1, arch_tab2 = st.tabs(["📚 التمارين", "📝 المذكرات"])
 
     with arch_tab1:
-        search_q = st.text_input("🔍 بحث:", placeholder="ابحث بعنوان أو مادة…")
+        search_q = st.text_input("🔍 بحث:", placeholder="ابحث بعنوان أو مادة…", key="db_search")
         exercises = get_exercises(search_q)
         if not exercises:
             st.info("لا توجد تمارين محفوظة.")
