@@ -21,10 +21,46 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.units import cm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from arabic_reshaper import reshape
 from bidi.algorithm import get_display
 
 load_dotenv()
+
+# خطوط PDF العربية (Amiri/Cairo) — ضع ملفات .ttf داخل مجلد fonts بجانب app.py
+_AR_FONT_MAIN = "Helvetica"
+_AR_FONT_BOLD = "Helvetica-Bold"
+_AR_FONTS_TRIED = False
+
+def _register_arabic_pdf_fonts():
+    """تسجيل خطوط TrueType للعربية في ReportLab إن وُجدت (بدون إلزام المستخدم)."""
+    global _AR_FONT_MAIN, _AR_FONT_BOLD, _AR_FONTS_TRIED
+    if _AR_FONTS_TRIED:
+        return
+    _AR_FONTS_TRIED = True
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    font_dir = os.path.join(base_dir, "fonts")
+    reg = []
+    for label, fname in (
+        ("Amiri", "Amiri-Regular.ttf"),
+        ("Amiri-Bold", "Amiri-Bold.ttf"),
+        ("Cairo", "Cairo-Regular.ttf"),
+        ("Cairo-Bold", "Cairo-Bold.ttf"),
+    ):
+        p = os.path.join(font_dir, fname)
+        if os.path.isfile(p):
+            try:
+                pdfmetrics.registerFont(TTFont(label, p))
+                reg.append(label)
+            except Exception:
+                pass
+    if "Cairo" in reg:
+        _AR_FONT_MAIN = "Cairo"
+        _AR_FONT_BOLD = "Cairo-Bold" if "Cairo-Bold" in reg else "Cairo"
+    elif "Amiri" in reg:
+        _AR_FONT_MAIN = "Amiri"
+        _AR_FONT_BOLD = "Amiri-Bold" if "Amiri-Bold" in reg else "Amiri"
 
 # ═══════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -37,8 +73,8 @@ st.set_page_config(page_title="DONIA SMART TEACHER",page_icon="🎓",
 # ═══════════════════════════════════════════════════════════
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
-*,*::before,*::after{font-family:'Tajawal',sans-serif!important}
+@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;800&display=swap');
+*,*::before,*::after{font-family:'Cairo','Amiri','Tajawal',sans-serif!important}
 .stApp{background:linear-gradient(135deg,#0f0c29 0%,#302b63 50%,#24243e 100%)}
 .main{direction:rtl;text-align:right}
 .title-card{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
@@ -245,28 +281,53 @@ def ar(txt):
     return fix_arabic(txt)
 
 def make_pdf_styles():
+    _register_arabic_pdf_fonts()
     styles = getSampleStyleSheet()
-    base = dict(fontName="Helvetica", leading=18, spaceAfter=4)
+    fn = _AR_FONT_MAIN
+    fb = _AR_FONT_BOLD
     return {
-        "body":  ParagraphStyle("body",  **base, fontSize=11, alignment=TA_RIGHT),
-        "title": ParagraphStyle("title", **base, fontName="Helvetica-Bold",
-                                fontSize=15, alignment=TA_CENTER,
+        "body":  ParagraphStyle("body",  fontName=fn, leading=18, spaceAfter=4, fontSize=11, alignment=TA_RIGHT),
+        "title": ParagraphStyle("title", fontName=fb, leading=20, spaceAfter=6, fontSize=15, alignment=TA_CENTER,
                                 textColor=rl_colors.HexColor("#764ba2")),
-        "h2":    ParagraphStyle("h2",    **base, fontName="Helvetica-Bold",
-                                fontSize=13, alignment=TA_RIGHT,
+        "h2":    ParagraphStyle("h2",    fontName=fb, leading=18, spaceAfter=4, fontSize=13, alignment=TA_RIGHT,
                                 textColor=rl_colors.HexColor("#667eea")),
-        "small": ParagraphStyle("small", **base, fontSize=9, alignment=TA_RIGHT,
+        "small": ParagraphStyle("small", fontName=fn, leading=14, spaceAfter=2, fontSize=9, alignment=TA_RIGHT,
                                 textColor=rl_colors.HexColor("#888888")),
-        "center":ParagraphStyle("center",**base, fontSize=11, alignment=TA_CENTER),
+        "center":ParagraphStyle("center",fontName=fn, leading=18, spaceAfter=4, fontSize=11, alignment=TA_CENTER),
     }
 
 def generate_simple_pdf(content, title, subtitle=""):
     buf = io.BytesIO()
+    _register_arabic_pdf_fonts()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.5*cm, leftMargin=1.5*cm,
-                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+                            topMargin=1.2*cm, bottomMargin=1.5*cm)
     S = make_pdf_styles()
-    story = [Paragraph(ar(f"DONIA SMART TEACHER  |  {title}"), S["title"])]
+    story = []
+    head_tbl = Table(
+        [
+            [Paragraph(ar("الجمهورية الجزائرية الديمقراطية الشعبية"), S["center"]),
+             Paragraph(ar("وزارة التربية الوطنية"), S["center"])],
+            [Paragraph(ar("DONIA SMART TEACHER — المعلم الذكي"), S["center"]),
+             Paragraph(ar("وثيقة رقمية — نسخة قابلة للطباعة"), S["center"])],
+        ],
+        colWidths=[8.2 * cm, 8.2 * cm],
+    )
+    head_tbl.setStyle(
+        TableStyle(
+            [
+                ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BOX", (0, 0), (-1, -1), 0.5, rl_colors.black),
+                ("BACKGROUND", (0, 0), (-1, -1), rl_colors.HexColor("#f4f2ff")),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.append(head_tbl)
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(ar(f"DONIA SMART TEACHER  |  {title}"), S["title"]))
     if subtitle:
         story.append(Paragraph(ar(subtitle), S["center"]))
     story.append(HRFlowable(width="100%",thickness=1.5,
@@ -739,8 +800,8 @@ with tab_plan:
                                      placeholder="توجيهات خاصة بالفوج...")
 
     if st.button("📝 توليد المذكرة الكاملة بالذكاء الاصطناعي", key="btn_gen_plan"):
-        if not api_key: st.error("⚠️ أضف GROQ_API_KEY")
-        elif not plan_lesson.strip(): st.warning("⚠️ أدخل عنوان الدرس")
+        if not api_key: st.warning("⚠️ أضف GROQ_API_KEY في متغيرات البيئة لإكمال التوليد.")
+        elif not plan_lesson.strip(): st.warning("⚠️ أدخل عنوان الدرس / المورد المعرفي لإكمال المذكرة.")
         else:
             prompt = f"""أنت أستاذ جزائري خبير. أعدّ مذكرة درس رسمية وفق المنهاج الجزائري لوزارة التربية الوطنية.
 
@@ -822,8 +883,10 @@ with tab_plan:
                         pdf_p = generate_lesson_plan_pdf(plan_data)
                         st.download_button("📄 تحميل PDF (النموذج الرسمي)", pdf_p,
                                            f"مذكرة_{plan_lesson}.pdf","application/pdf", key="dl_plan_pdf")
+                except ValueError as err:
+                    st.warning(f"⚠️ تعذر معالجة بيانات المذكرة (ValueError). تأكد من إكمال الحقول الأساسية. التفاصيل: {err}")
                 except Exception as err:
-                    st.markdown(f'<div class="error-box">❌ {err}</div>', unsafe_allow_html=True)
+                    st.warning(f"⚠️ تعذر إكمال توليد المذكرة. تحقق من الاتصال ومن مفتاح Groq. التفاصيل: {err}")
 
 # ══════════════════════════════════════════════════════════
 # TAB 2 — توليد اختبار (النموذج الرسمي)
@@ -1361,7 +1424,23 @@ with tab_archive:
     with arch_tabs[1]:
         plans = db_exec("SELECT * FROM lesson_plans ORDER BY created_at DESC", fetch=True) or []
         for p in plans:
-            pid,lv,gr,sub,les,dom,dur,cont,created = p
+            try:
+                if p is None or not isinstance(p, (tuple, list)) or len(p) < 9:
+                    st.warning("⚠️ سجل مذكرة غير مكتمل في قاعدة البيانات — تم تخطيه. أعد حفظ المذكرة بعد إكمال عنوان الدرس والحقول.")
+                    continue
+                pid, lv, gr, sub, les, dom, dur, cont, created = p[:9]
+                les = "بدون عنوان" if les is None else str(les)
+                sub = "" if sub is None else str(sub)
+                gr = "" if gr is None else str(gr)
+                dom = "" if dom is None else str(dom)
+                cont = "" if cont is None else str(cont)
+                created = "" if created is None else str(created)
+            except ValueError as ve:
+                st.warning(f"⚠️ تعذر قراءة سجل مذكرة (ValueError): {ve}")
+                continue
+            except Exception as e:
+                st.warning(f"⚠️ تعذر عرض مذكرة من الأرشيف: {e}")
+                continue
             with st.expander(f"📝 {les} | {sub} | {gr} | {dom} | 🕒 {created}"):
                 st.markdown(f'<div class="result-box">{cont[:350]}…</div>', unsafe_allow_html=True)
                 pp1,pp2 = st.columns(2)
