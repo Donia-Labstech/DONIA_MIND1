@@ -8,7 +8,7 @@ DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — نسخة تط
   FIX-3 [TypeError format] : safe_f() لتأمين تنسيق None في generate_report_pdf
   FIX-4 [ValueError empty] : حماية max()/min() على قوائم فارغة
   FIX-5 [dir() vs locals()]: استبدال dir() بـ متغيرات مُعرَّفة مسبقاً
-  FIX-6 [Excel parsing]    : parse_grade_book_excel + fallback pandas/openpyxl/xlrd
+  FIX-6 [Excel parsing]    : parse_grade_book_excel + أوراق متعددة (دمج / اختيار ورقة) + pandas/xlrd
   UX-1  : ثيم احترافي، أزرار كبيرة، آفاتار روبوت، إخفاء اسم نموذج الذكاء الاصطناعي عن الواجهة
   I18N  : مواد لغوية أجنبية — توليد وPDF باتجاه LTR عند الحاجة
   OCR   : معاينة صور أوراق الإجابة + استخراج نص اختياري (pytesseract)
@@ -16,6 +16,7 @@ DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — نسخة تط
 """
 import streamlit as st
 import os, sqlite3, re, json, io, base64
+import urllib.request
 from datetime import datetime
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
@@ -53,6 +54,22 @@ load_dotenv()
 
 # نموذج الذكاء الاصطناعي الافتراضي (لا يُعرض في الواجهة العامة — يُحمّل من البيئة)
 DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+# حماية الملكية الفكرية — تظهر في الواجهة وفي تذييل كل PDF
+COPYRIGHT_FOOTER_AR = (
+    "جميع حقوق الملكية محفوظة لمختبر الأفكار الذكية والتكنولوجيا - DONIA LABS TECH © 2026"
+)
+
+# روابط التواصل (يمكن تجاوزها عبر متغيرات البيئة)
+SOCIAL_URL_WHATSAPP = os.getenv("DONIA_URL_WHATSAPP", "https://wa.me/213674661737")
+SOCIAL_URL_LINKEDIN = os.getenv(
+    "DONIA_URL_LINKEDIN",
+    "https://www.linkedin.com/in/donia-labs-tech-smart-ideas-lab",
+)
+SOCIAL_URL_FACEBOOK = os.getenv(
+    "DONIA_URL_FACEBOOK", "https://www.facebook.com/share/1An6GhVd56/"
+)
+SOCIAL_URL_TELEGRAM = os.getenv("DONIA_URL_TELEGRAM", "https://t.me/+LxRzVAK12HZmNTQ8")
 
 
 def _escape_xml_for_rl(text: str) -> str:
@@ -115,6 +132,28 @@ _AR_FONT_MAIN = "Helvetica"
 _AR_FONT_BOLD = "Helvetica-Bold"
 _AR_FONTS_TRIED = False
 
+
+def _try_download_amiri_font_files(font_dir: str) -> None:
+    """تحميل تلقائي لخط Amiri من المستودع الرسمي إذا غابت الملفات (يمكن تعطيله: DONIA_AUTO_DOWNLOAD_FONTS=0)."""
+    if os.getenv("DONIA_AUTO_DOWNLOAD_FONTS", "1").strip().lower() in ("0", "false", "no"):
+        return
+    os.makedirs(font_dir, exist_ok=True)
+    pairs = (
+        ("Amiri-Regular.ttf",
+         "https://raw.githubusercontent.com/googlefonts/amiri/main/fonts/ttf/Amiri-Regular.ttf"),
+        ("Amiri-Bold.ttf",
+         "https://raw.githubusercontent.com/googlefonts/amiri/main/fonts/ttf/Amiri-Bold.ttf"),
+    )
+    for fname, url in pairs:
+        p = os.path.join(font_dir, fname)
+        if os.path.isfile(p) and os.path.getsize(p) > 8000:
+            continue
+        try:
+            urllib.request.urlretrieve(url, p)
+        except Exception:
+            pass
+
+
 def _register_arabic_pdf_fonts():
     global _AR_FONT_MAIN, _AR_FONT_BOLD, _AR_FONTS_TRIED
     if _AR_FONTS_TRIED:
@@ -122,6 +161,7 @@ def _register_arabic_pdf_fonts():
     _AR_FONTS_TRIED = True
     base_dir = os.path.dirname(os.path.abspath(__file__))
     font_dir = os.path.join(base_dir, "fonts")
+    _try_download_amiri_font_files(font_dir)
     reg = []
     for label, fname in (
         ("Amiri", "Amiri-Regular.ttf"),
@@ -273,6 +313,15 @@ section[data-testid="stSidebar"] .stMarkdown{text-align:right}
 .grade-B{color:#38bdf8;font-weight:700}
 .grade-C{color:#fbbf24;font-weight:700}
 .grade-D{color:#f87171;font-weight:700}
+.donia-social{display:flex;flex-wrap:wrap;gap:.45rem;justify-content:center;margin:.35rem 0}
+.donia-social a{
+  display:inline-block;padding:.35rem .65rem;border-radius:12px;
+  background:rgba(14,116,144,.35);color:#ecfeff!important;font-weight:700;font-size:.82rem;
+  text-decoration:none!important;border:1px solid rgba(94,234,212,.35);
+  transition:transform .2s,box-shadow .2s;
+}
+.donia-social a:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(13,148,136,.45)}
+.donia-ip-footer{text-align:center;font-size:.82rem;color:rgba(226,232,240,.88);padding:1rem 0 0;margin-top:1.5rem;border-top:1px solid rgba(148,163,184,.2)}
 </style>
 """, unsafe_allow_html=True)
 
@@ -491,6 +540,26 @@ def safe_f(val, fmt=".2f") -> str:
 def ar(txt) -> str:
     return fix_arabic(txt)
 
+
+def _draw_pdf_footer(canvas, doc):
+    """تذييل كل صفحة PDF — عبارة حماية الملكية الفكرية (DONIA LABS TECH)."""
+    _register_arabic_pdf_fonts()
+    canvas.saveState()
+    w, _h = doc.pagesize
+    fn = _AR_FONT_MAIN
+    try:
+        canvas.setFont(fn, 8)
+    except Exception:
+        canvas.setFont("Helvetica", 8)
+    txt = fix_arabic(COPYRIGHT_FOOTER_AR) if _ARABIC_AVAILABLE else COPYRIGHT_FOOTER_AR
+    canvas.drawCentredString(w / 2.0, 0.55 * cm, txt)
+    canvas.restoreState()
+
+
+def _pdf_footer_canvas_args() -> dict:
+    return dict(onFirstPage=_draw_pdf_footer, onLaterPages=_draw_pdf_footer)
+
+
 # ─── PDF helpers ────────────────────────────────────────────
 
 def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool = True) -> bytes:
@@ -498,7 +567,7 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
     _register_arabic_pdf_fonts()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.5*cm, leftMargin=1.5*cm,
-                            topMargin=1.2*cm, bottomMargin=1.5*cm)
+                            topMargin=1.2*cm, bottomMargin=2.0*cm)
     S = make_pdf_styles(rtl)
     story = []
     align_hdr = "RIGHT" if rtl else "LEFT"
@@ -538,7 +607,7 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
         else:
             story.append(Paragraph(pdf_text_line(line, rtl), S["body"]))
         story.append(Spacer(1, 2))
-    doc.build(story)
+    doc.build(story, **_pdf_footer_canvas_args())
     buf.seek(0)
     return buf.read()
 
@@ -547,7 +616,7 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.8*cm, leftMargin=1.8*cm,
-                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+                            topMargin=1.5*cm, bottomMargin=2.0*cm)
     subj = exam_data.get("subject", "") or ""
     rtl, lang = get_pdf_mode_for_subject(subj)
     S = make_pdf_styles(rtl)
@@ -630,7 +699,7 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
                             ParagraphStyle("exam_end_" + ("rtl" if rtl else "ltr"),
                                            fontName=fn_b if rtl else "Helvetica-Bold",
                                            fontSize=11, alignment=TA_CENTER)))
-    doc.build(story)
+    doc.build(story, **_pdf_footer_canvas_args())
     buf.seek(0)
     return buf.read()
 
@@ -639,7 +708,7 @@ def generate_report_pdf(report_data: dict) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.5*cm, leftMargin=1.5*cm,
-                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+                            topMargin=1.5*cm, bottomMargin=2.0*cm)
     _register_arabic_pdf_fonts()
     fn_pdf = _AR_FONT_MAIN
     fb_pdf = _AR_FONT_BOLD
@@ -672,13 +741,21 @@ def generate_report_pdf(report_data: dict) -> bytes:
 
         if cls.get('top5'):
             story.append(Paragraph(ar("أفضل 5 تلاميذ"), S["h2"]))
-            top_data = [[ar("الرتبة"), ar("الاسم"), ar("المعدل")]]
+            top_data = [[
+                Paragraph(ar("الرتبة"), S["body"]),
+                Paragraph(ar("الاسم"), S["body"]),
+                Paragraph(ar("المعدل"), S["body"]),
+            ]]
             for i, s in enumerate(cls['top5'], 1):
-                top_data.append([str(i), ar(s['name']), safe_f(s['avg'])])
+                top_data.append([
+                    Paragraph(str(i), S["body"]),
+                    Paragraph(ar(s['name']), S["body"]),
+                    Paragraph(safe_f(s['avg']), S["body"]),
+                ])
             t = Table(top_data, colWidths=[2*cm, 10*cm, 3*cm])
             t.setStyle(TableStyle([
                 ('ALIGN',       (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME',    (0, 0), (-1, 0),  fb_pdf),
+                ('VALIGN',      (0, 0), (-1, -1), 'MIDDLE'),
                 ('BACKGROUND',  (0, 0), (-1, 0),  rl_colors.HexColor("#667eea")),
                 ('TEXTCOLOR',   (0, 0), (-1, 0),  rl_colors.white),
                 ('GRID',        (0, 0), (-1, -1), 0.5, rl_colors.grey),
@@ -692,14 +769,23 @@ def generate_report_pdf(report_data: dict) -> bytes:
             story.append(Paragraph(ar("توزيع الدرجات"), S["h2"]))
             dist = cls['distribution']
             dist_data = [
-                [ar("0-5"),             ar("5-10"),             ar("10-15"),            ar("15-20")],
-                [str(dist.get('0-5', 0)), str(dist.get('5-10', 0)),
-                 str(dist.get('10-15', 0)), str(dist.get('15-20', 0))],
+                [
+                    Paragraph(ar("0-5"), S["body"]),
+                    Paragraph(ar("5-10"), S["body"]),
+                    Paragraph(ar("10-15"), S["body"]),
+                    Paragraph(ar("15-20"), S["body"]),
+                ],
+                [
+                    Paragraph(str(dist.get('0-5', 0)), S["body"]),
+                    Paragraph(str(dist.get('5-10', 0)), S["body"]),
+                    Paragraph(str(dist.get('10-15', 0)), S["body"]),
+                    Paragraph(str(dist.get('15-20', 0)), S["body"]),
+                ],
             ]
             t = Table(dist_data, colWidths=[4*cm]*4)
             t.setStyle(TableStyle([
                 ('ALIGN',      (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME',   (0, 0), (-1, 0),  fb_pdf),
+                ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
                 ('BACKGROUND', (0, 0), (-1, 0),  rl_colors.HexColor("#302b63")),
                 ('TEXTCOLOR',  (0, 0), (-1, 0),  rl_colors.white),
                 ('GRID',       (0, 0), (-1, -1), 0.5, rl_colors.grey),
@@ -714,7 +800,7 @@ def generate_report_pdf(report_data: dict) -> bytes:
                 story.append(Paragraph(ar(line.strip()), S["body"]))
         story.append(Spacer(1, 4))
 
-    doc.build(story)
+    doc.build(story, **_pdf_footer_canvas_args())
     buf.seek(0)
     return buf.read()
 
@@ -808,41 +894,11 @@ def generate_grade_book_excel(students: list, class_name: str,
     wb.save(buf); buf.seek(0)
     return buf.read()
 
-# ─── FIX-6: Parse Excel grade book — نسخة أكثر متانة ──────
-def parse_grade_book_excel(uploaded_file) -> list:
-    """
-    FIX-6: تحليل دفتر التنقيط الجزائري بصورة أكثر متانة.
-    يدعم:
-      - الملفات التي تبدأ ببيانات قبل العنوان
-      - الصفوف التي تحتوي على None جزئياً
-      - الملفات ذات الفتارات (blank rows) المتعددة
-      - .xlsx عبر openpyxl، مع fallback إلى pandas عند الحاجة
-    """
+# ─── FIX-6: Parse Excel grade book — نسخة أكثر متانة + أوراق متعددة ──────
+def _parse_rows_from_list(rows_list) -> list:
+    """استخراج تلاميذ من صفوف جدول واحد (ورقة واحدة)."""
     students = []
     data_started = False
-    rows_list = []
-    try:
-        uploaded_file.seek(0)
-        wb = openpyxl.load_workbook(uploaded_file, data_only=True)
-        ws = wb.active
-        rows_list = list(ws.iter_rows(values_only=True))
-    except Exception:
-        uploaded_file.seek(0)
-        raw = uploaded_file.read()
-        bio = io.BytesIO(raw)
-        name = (getattr(uploaded_file, "name", "") or "").lower()
-        try:
-            df = pd.read_excel(bio, engine="openpyxl", header=None)
-        except Exception:
-            bio.seek(0)
-            try:
-                eng = "xlrd" if name.endswith(".xls") and not name.endswith(".xlsx") else None
-                df = pd.read_excel(bio, engine=eng, header=None) if eng else pd.read_excel(bio, header=None)
-            except Exception:
-                bio.seek(0)
-                df = pd.read_excel(bio, header=None)
-        rows_list = [tuple(row) for row in df.values]
-
     HEADER_MARKERS = {'matricule', 'رقم التعريف', 'اللقب', 'nom', 'prénom',
                       'الاسم', 'تقويم', 'فرض', 'اختبار', 'taqwim'}
 
@@ -852,20 +908,18 @@ def parse_grade_book_excel(uploaded_file) -> list:
 
         row_strs = [str(c).strip().lower() if c is not None else '' for c in row]
 
-        # كشف صف العناوين
         if not data_started:
             if any(m in row_strs for m in HEADER_MARKERS):
                 data_started = True
             continue
 
-        # صف البيانات: يجب أن يكون عمود اللقب (index 1) غير فارغ
         vals = list(row)
         if len(vals) < 4:
             continue
 
         nom = str(vals[1] or '').strip()
         if not nom or nom.lower() in ('اللقب', 'nom', 'prénom', 'الاسم'):
-            continue  # صف عنوان ثانوي أو فارغ
+            continue
 
         try:
             stu = {
@@ -881,9 +935,95 @@ def parse_grade_book_excel(uploaded_file) -> list:
             stu['apprec']  = get_appreciation(stu['average'])
             students.append(stu)
         except (ValueError, TypeError):
-            continue  # صف تعليق أو بيانات غير عددية
+            continue
 
     return students
+
+
+def list_excel_sheet_names(uploaded_file) -> list:
+    """قائمة أسماء أوراق ملف Excel (لاختيار المستخدم)."""
+    try:
+        uploaded_file.seek(0)
+        wb = openpyxl.load_workbook(uploaded_file, read_only=True, data_only=True)
+        names = list(wb.sheetnames)
+        wb.close()
+        return names
+    except Exception:
+        uploaded_file.seek(0)
+        raw = uploaded_file.read()
+        bio = io.BytesIO(raw)
+        try:
+            xl = pd.ExcelFile(bio)
+            return list(xl.sheet_names)
+        except Exception:
+            return []
+
+
+def parse_grade_book_excel(uploaded_file, sheet_name=None, merge_all_sheets=False) -> list:
+    """
+    FIX-6: تحليل دفتر التنقيط الجزائري بصورة أكثر متانة.
+    يدعم:
+      - الملفات التي تبدأ ببيانات قبل العنوان
+      - الصفوف التي تحتوي على None جزئياً
+      - الملفات ذات الفتارات (blank rows) المتعددة
+      - .xlsx عبر openpyxl، مع fallback إلى pandas عند الحاجة
+      - دمج جميع الأوراق (merge_all_sheets=True) مع الحقل sheet_source
+      - ورقة محددة عبر sheet_name عند عدم الدمج
+    """
+    students = []
+    try:
+        uploaded_file.seek(0)
+        wb = openpyxl.load_workbook(uploaded_file, data_only=True)
+        if merge_all_sheets:
+            for nm in wb.sheetnames:
+                rows_list = list(wb[nm].iter_rows(values_only=True))
+                part = _parse_rows_from_list(rows_list)
+                for s in part:
+                    s['sheet_source'] = nm
+                students.extend(part)
+            return students
+        if sheet_name and sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+        else:
+            ws = wb.active
+        rows_list = list(ws.iter_rows(values_only=True))
+        return _parse_rows_from_list(rows_list)
+    except Exception:
+        uploaded_file.seek(0)
+        raw = uploaded_file.read()
+        bio = io.BytesIO(raw)
+        name = (getattr(uploaded_file, "name", "") or "").lower()
+        try:
+            xl = pd.ExcelFile(bio)
+        except Exception:
+            try:
+                df = pd.read_excel(bio, engine="openpyxl", header=None)
+                rows_list = [tuple(row) for row in df.values]
+                return _parse_rows_from_list(rows_list)
+            except Exception:
+                bio.seek(0)
+                try:
+                    eng = "xlrd" if name.endswith(".xls") and not name.endswith(".xlsx") else None
+                    df = pd.read_excel(bio, engine=eng, header=None) if eng else pd.read_excel(bio, header=None)
+                except Exception:
+                    bio.seek(0)
+                    df = pd.read_excel(bio, header=None)
+                rows_list = [tuple(row) for row in df.values]
+                return _parse_rows_from_list(rows_list)
+
+        if merge_all_sheets:
+            for nm in xl.sheet_names:
+                df = pd.read_excel(xl, sheet_name=nm, header=None)
+                rows_list = [tuple(row) for row in df.values]
+                part = _parse_rows_from_list(rows_list)
+                for s in part:
+                    s['sheet_source'] = nm
+                students.extend(part)
+            return students
+        sn = sheet_name if sheet_name and sheet_name in xl.sheet_names else xl.sheet_names[0]
+        df = pd.read_excel(xl, sheet_name=sn, header=None)
+        rows_list = [tuple(row) for row in df.values]
+        return _parse_rows_from_list(rows_list)
 
 # ─── FIX-4: دالة مساعِدة لبناء إحصاء قسم من قائمة تلاميذ ──
 def build_class_stats(stus: list, cls_name: str) -> dict:
@@ -922,7 +1062,7 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     S = make_pdf_styles(rtl)
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.2*cm, leftMargin=1.2*cm,
-                            topMargin=1.2*cm, bottomMargin=1.2*cm)
+                            topMargin=1.2*cm, bottomMargin=2.0*cm)
     story = []
 
     story.append(Paragraph(
@@ -1028,7 +1168,7 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
         ('BACKGROUND', (0, 0), (0, -1),  rl_colors.HexColor("#e8e8ff")),
     ]))
     story.append(pt)
-    doc.build(story)
+    doc.build(story, **_pdf_footer_canvas_args())
     buf.seek(0)
     return buf.read()
 
@@ -1036,8 +1176,17 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
 # SIDEBAR
 # ═══════════════════════════════════════════════════════════
 with st.sidebar:
+    _logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_donia.png")
+    if os.path.isfile(_logo_path):
+        st.image(_logo_path, width=220, caption="DONIA LABS TECH")
     st.markdown("## ⚙️ الإعدادات العامة")
-    api_key = os.getenv("GROQ_API_KEY", "")
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    try:
+        if not api_key and hasattr(st, "secrets") and getattr(st, "secrets", None):
+            if "GROQ_API_KEY" in st.secrets:
+                api_key = str(st.secrets["GROQ_API_KEY"]).strip()
+    except Exception:
+        pass
 
     level = st.selectbox("🏫 الطور التعليمي", list(CURRICULUM.keys()))
     info  = CURRICULUM[level]
@@ -1078,10 +1227,28 @@ with st.sidebar:
                     unsafe_allow_html=True)
 
     with st.expander("☁️ إعدادات السحابة"):
+        st.caption(
+            "مفاتيح Groq و Google Drive و Firebase مستقلة — لا تداخل؛ "
+            "يُنصح بـ .env أو أسرار Streamlit لكل مفتاح على حدة."
+        )
         drive_json    = st.text_area("مفتاح Google Drive (JSON)", height=60,
                                       placeholder='{"type":"service_account",...}')
         firebase_json = st.text_area("مفتاح Firebase (JSON)", height=60,
                                       placeholder='{"type":"service_account",...}')
+
+    st.markdown("---")
+    st.markdown("**تواصل — DONIA LABS TECH**")
+    st.markdown(
+        f"""
+        <div class="donia-social">
+          <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer" title="WhatsApp">📱 WA</a>
+          <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer" title="LinkedIn">💼 in</a>
+          <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook">📘 f</a>
+          <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer" title="Telegram">✈️ TG</a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # نموذج التوليد الافتراضي (غير معروض في الواجهة — FIX أمان واجهة)
 model_name = DEFAULT_GROQ_MODEL
@@ -1401,9 +1568,21 @@ with tab_grade:
         gr_file = st.file_uploader("📁 ارفع ملف دفتر التنقيط:",
                                     type=["xlsx", "xls"], key="gr_upload")
         if gr_file:
+            _sheet_names = list_excel_sheet_names(gr_file)
+            gr_merge = st.checkbox(
+                "دمج جميع أوراق الملف (Sheets) في قائمة واحدة",
+                value=False, key="gr_merge_all",
+                help="يفيد عند وجود عدة أقسام/أفواج في نفس الملف.")
+            gr_sel = None
+            if not gr_merge and len(_sheet_names) > 1:
+                gr_sel = st.selectbox(
+                    "اختر الورقة المراد قراءتها:", _sheet_names, key="gr_sheet_pick")
+            elif not gr_merge and len(_sheet_names) == 1:
+                gr_sel = _sheet_names[0]
             with st.spinner("جاري قراءة الملف…"):
                 try:
-                    students_data = parse_grade_book_excel(gr_file)
+                    students_data = parse_grade_book_excel(
+                        gr_file, sheet_name=gr_sel, merge_all_sheets=gr_merge)
                     st.success(f"✅ تم قراءة {len(students_data)} تلميذ")
                 except Exception as e:
                     st.error(f"خطأ في القراءة: {e}")
@@ -1442,6 +1621,7 @@ with tab_grade:
 
         df = pd.DataFrame([{
             "اللقب": s.get('nom', ''), "الاسم": s.get('prenom', ''),
+            "الورقة": s.get('sheet_source', ''),
             "تقويم /20": s.get('taqwim', ''), "فرض /20": s.get('fard', ''),
             "اختبار /20": s.get('ikhtibhar', ''),
             "المعدل": s.get('average', 0), "التقدير": s.get('apprec', '')
@@ -1512,10 +1692,23 @@ with tab_report:
         rep_files = st.file_uploader(
             "📁 ارفع ملفات دفتر التنقيط (يمكن رفع عدة أقسام):",
             type=["xlsx"], accept_multiple_files=True, key="rep_upload")
+        rep_merge_sheets = st.checkbox(
+            "دمج جميع أوراق كل ملف Excel", value=False, key="rep_merge_all",
+            help="عند التفعيل تُقرأ كل الأوراق وتُدمج لكل ملف.")
+        rep_sheet_choice = None
+        if rep_files and not rep_merge_sheets:
+            _sn0 = list_excel_sheet_names(rep_files[0])
+            if len(_sn0) > 1:
+                rep_sheet_choice = st.selectbox(
+                    "الورقة المستخدمة (يُفترض تطابق أسماء الأوراق بين الملفات):",
+                    _sn0, key="rep_sheet_pick")
+            elif _sn0:
+                rep_sheet_choice = _sn0[0]
         if rep_files:
             for f in rep_files:
                 try:
-                    stus = parse_grade_book_excel(f)
+                    stus = parse_grade_book_excel(
+                        f, sheet_name=rep_sheet_choice, merge_all_sheets=rep_merge_sheets)
                     if stus:
                         cls_name = f.name.replace(".xlsx", "").replace("_", " ")
                         all_classes.append(build_class_stats(stus, cls_name))
@@ -2006,3 +2199,9 @@ with tab_stats:
         else:
             st.markdown('<div class="error-box">❌ Firebase: غير متصل</div>',
                         unsafe_allow_html=True)
+
+# ─── تذييل الواجهة الرئيسية — حقوق الملكية الفكرية ───
+st.markdown(
+    f'<div class="donia-ip-footer">{COPYRIGHT_FOOTER_AR}</div>',
+    unsafe_allow_html=True,
+)
