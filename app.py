@@ -1,14 +1,17 @@
 """
-DONIA SMART TEACHER - النسخة الشاملة المُصحَّحة
+DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — نسخة تطوير شاملة
 المعلم الذكي للمنظومة التربوية الجزائرية
 ═══════════════════════════════════════════════════════════
-إصلاحات مُطبَّقة:
+إصلاحات وتحسينات:
   FIX-1 [ValueError ~1364] : تعزيز unpack سجلات DB مع [:9] + guard كامل
-  FIX-2 [TypeError ~252]   : _STYLES_CACHE لتجنُّب إعادة إنشاء ParagraphStyle
+  FIX-2 [TypeError ~252]   : _STYLES_CACHE dict RTL/LTR — أسماء ParagraphStyle فريدة
   FIX-3 [TypeError format] : safe_f() لتأمين تنسيق None في generate_report_pdf
   FIX-4 [ValueError empty] : حماية max()/min() على قوائم فارغة
   FIX-5 [dir() vs locals()]: استبدال dir() بـ متغيرات مُعرَّفة مسبقاً
-  FIX-6 [Excel parsing]    : parse_grade_book_excel أكثر متانة
+  FIX-6 [Excel parsing]    : parse_grade_book_excel + fallback pandas/openpyxl/xlrd
+  UX-1  : ثيم احترافي، أزرار كبيرة، آفاتار روبوت، إخفاء اسم نموذج الذكاء الاصطناعي عن الواجهة
+  I18N  : مواد لغوية أجنبية — توليد وPDF باتجاه LTR عند الحاجة
+  OCR   : معاينة صور أوراق الإجابة + استخراج نص اختياري (pytesseract)
 ═══════════════════════════════════════════════════════════
 """
 import streamlit as st
@@ -40,7 +43,70 @@ try:
 except ImportError:
     _ARABIC_AVAILABLE = False
 
+try:
+    import pytesseract  # noqa: F401 — استخراج نص من صور أوراق الإجابة (اختياري)
+    _TESSERACT_AVAILABLE = True
+except ImportError:
+    _TESSERACT_AVAILABLE = False
+
 load_dotenv()
+
+# نموذج الذكاء الاصطناعي الافتراضي (لا يُعرض في الواجهة العامة — يُحمّل من البيئة)
+DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+
+def _escape_xml_for_rl(text: str) -> str:
+    s = str(text)
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def get_pdf_mode_for_subject(subject: str) -> tuple[bool, str]:
+    """يُعيد (rtl؟, اسم_اللغة_للتوجيه). المواد اللغوية الأجنبية = LTR في PDF."""
+    s = (subject or "").strip()
+    if "الإيطالية" in s or "Italien" in s:
+        return False, "Italian"
+    if "الألمانية" in s or "Allemand" in s:
+        return False, "German"
+    if "الإسبانية" in s or "Espagnol" in s:
+        return False, "Spanish"
+    if "الإنجليزية" in s or "Anglais" in s.lower():
+        return False, "English"
+    if "الفرنسية" in s or "Français" in s:
+        return False, "French"
+    return True, "Arabic"
+
+
+def pdf_text_line(text: str, rtl: bool) -> str:
+    """نص آمن لـ ReportLab Paragraph — عربي RTL أو لاتيني LTR."""
+    if rtl:
+        return fix_arabic(str(text))
+    return _escape_xml_for_rl(text)
+
+
+def llm_output_language_clause(subject: str) -> str:
+    rtl, lang = get_pdf_mode_for_subject(subject)
+    if rtl:
+        return (
+            "قاعدة إلزامية: اكتب كل المحتوى (العناوين، الأسئلة، الشروح) بالعربية الفصحى الواضحة."
+        )
+    return (
+        f"Mandatory: produce the ENTIRE output (titles, exercises, exam items, options, memo) "
+        f"entirely in {lang}. Do not use Arabic for instructional text. "
+        f"Use correct typography and numbering for Latin left-to-right text."
+    )
+
+
+def ocr_answer_sheet_image(image_bytes: bytes) -> str:
+    """استخراج نص من صورة (يتطلب تثبيت Tesseract على النظام عند استخدام pytesseract)."""
+    if not _TESSERACT_AVAILABLE:
+        return ""
+    try:
+        import pytesseract as _pt
+        bio = io.BytesIO(image_bytes)
+        im = Image.open(bio).convert("RGB")
+        return _pt.image_to_string(im, lang="ara+eng+fra")
+    except Exception:
+        return ""
 
 # ═══════════════════════════════════════════════════════════
 # خطوط PDF العربية
@@ -80,98 +146,133 @@ def _register_arabic_pdf_fonts():
 # ═══════════════════════════════════════════════════════════
 # FIX-2: _STYLES_CACHE — تجنُّب إنشاء ParagraphStyle مرتين
 # (كان يمكن أن يُسبِّب TypeError إذا أُضيف الاسم لـ getSampleStyleSheet)
+# + دعم LTR للمواد اللغوية الأجنبية (أسماء أنماط فريدة لكل وضع)
 # ═══════════════════════════════════════════════════════════
-_STYLES_CACHE: dict | None = None
+_STYLES_CACHE: dict[str, dict] = {}
 
-def make_pdf_styles() -> dict:
-    """إنشاء أنماط PDF مع cache لتجنُّب إعادة التسجيل (FIX-2)."""
+
+def make_pdf_styles(rtl: bool = True) -> dict:
+    """إنشاء أنماط PDF مع cache — RTL للعربية، LTR للمواد اللاتينية."""
     global _STYLES_CACHE
-    if _STYLES_CACHE is not None:
-        return _STYLES_CACHE
+    key = "rtl" if rtl else "ltr"
+    if key in _STYLES_CACHE:
+        return _STYLES_CACHE[key]
     _register_arabic_pdf_fonts()
-    fn = _AR_FONT_MAIN
-    fb = _AR_FONT_BOLD
+    if rtl:
+        fn, fb = _AR_FONT_MAIN, _AR_FONT_BOLD
+        body_al, h2_al, sm_al = TA_RIGHT, TA_RIGHT, TA_RIGHT
+    else:
+        fn, fb = "Helvetica", "Helvetica-Bold"
+        body_al, h2_al, sm_al = TA_LEFT, TA_LEFT, TA_LEFT
     # ملاحظة: لا نستدعي getSampleStyleSheet().add() أبداً لتفادي
     # KeyError/TypeError عند الاستدعاء المتكرر في نفس الجلسة
-    _STYLES_CACHE = {
-        "body":   ParagraphStyle("donia_body",   fontName=fn, leading=18,
-                                 spaceAfter=4, fontSize=11, alignment=TA_RIGHT),
-        "title":  ParagraphStyle("donia_title",  fontName=fb, leading=20,
+    _STYLES_CACHE[key] = {
+        "body":   ParagraphStyle(f"donia_body_{key}",   fontName=fn, leading=18,
+                                 spaceAfter=4, fontSize=11, alignment=body_al),
+        "title":  ParagraphStyle(f"donia_title_{key}",  fontName=fb, leading=20,
                                  spaceAfter=6, fontSize=15, alignment=TA_CENTER,
-                                 textColor=rl_colors.HexColor("#764ba2")),
-        "h2":     ParagraphStyle("donia_h2",     fontName=fb, leading=18,
-                                 spaceAfter=4, fontSize=13, alignment=TA_RIGHT,
-                                 textColor=rl_colors.HexColor("#667eea")),
-        "small":  ParagraphStyle("donia_small",  fontName=fn, leading=14,
-                                 spaceAfter=2, fontSize=9,  alignment=TA_RIGHT,
-                                 textColor=rl_colors.HexColor("#888888")),
-        "center": ParagraphStyle("donia_center", fontName=fn, leading=18,
+                                 textColor=rl_colors.HexColor("#1e3a5f")),
+        "h2":     ParagraphStyle(f"donia_h2_{key}",     fontName=fb, leading=18,
+                                 spaceAfter=4, fontSize=13, alignment=h2_al,
+                                 textColor=rl_colors.HexColor("#0d9488")),
+        "small":  ParagraphStyle(f"donia_small_{key}",  fontName=fn, leading=14,
+                                 spaceAfter=2, fontSize=9,  alignment=sm_al,
+                                 textColor=rl_colors.HexColor("#64748b")),
+        "center": ParagraphStyle(f"donia_center_{key}", fontName=fn, leading=18,
                                  spaceAfter=4, fontSize=11, alignment=TA_CENTER),
     }
-    return _STYLES_CACHE
+    return _STYLES_CACHE[key]
 
 # ═══════════════════════════════════════════════════════════
 # PAGE CONFIG
 # ═══════════════════════════════════════════════════════════
-st.set_page_config(page_title="DONIA SMART TEACHER", page_icon="🎓",
+st.set_page_config(page_title="DONIA MIND — المعلم الذكي", page_icon="🎓",
                    layout="wide", initial_sidebar_state="expanded")
 
 # ═══════════════════════════════════════════════════════════
-# CSS
+# CSS — ثيم تقني مريح للعين، تباين عالٍ، أزرار كبيرة وزوايا دائرية
 # ═══════════════════════════════════════════════════════════
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;800&display=swap');
 *,*::before,*::after{font-family:'Cairo','Amiri','Tajawal',sans-serif!important}
-.stApp{background:linear-gradient(135deg,#0f0c29 0%,#302b63 50%,#24243e 100%)}
-.main{direction:rtl;text-align:right}
-.title-card{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
-  padding:1.6rem 2rem;border-radius:20px;text-align:center;
-  margin-bottom:1.4rem;box-shadow:0 12px 45px rgba(102,126,234,.45)}
-.title-card h1{color:#fff;font-size:2rem;font-weight:800;margin:0}
-.title-card p{color:rgba(255,255,255,.85);font-size:.95rem;margin:.4rem 0 0}
-.stat-card{background:linear-gradient(135deg,rgba(102,126,234,.15),rgba(118,75,162,.15));
-  border:1px solid rgba(102,126,234,.35);border-radius:14px;
-  padding:1rem;text-align:center;margin-bottom:.7rem}
-.stat-card h2{font-size:1.9rem;margin:0}
-.stat-card p{margin:0;color:rgba(255,255,255,.7);font-size:.85rem}
-.feature-card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);
-  border-radius:14px;padding:1.2rem;margin:.5rem 0;
-  direction:rtl;text-align:right;color:rgba(255,255,255,.92)}
-.feature-card h4{color:#a78bfa;margin:0 0 .4rem;font-size:1rem}
-.result-box{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
-  border-radius:14px;padding:1.4rem;direction:rtl;text-align:right;
-  color:rgba(255,255,255,.9);line-height:2;margin:.8rem 0}
-.db-item{background:rgba(255,255,255,.06);border-right:4px solid #667eea;
-  border-radius:8px;padding:.8rem 1rem;margin:.4rem 0;
-  direction:rtl;text-align:right;color:rgba(255,255,255,.9)}
-.error-box{background:rgba(220,38,38,.12);border:1px solid rgba(220,38,38,.4);
-  border-radius:10px;padding:1rem;direction:rtl;text-align:right;
-  color:#fca5a5;margin:.6rem 0}
-.success-box{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.35);
-  border-radius:10px;padding:1rem;direction:rtl;text-align:right;
-  color:#6ee7b7;margin:.6rem 0}
-.warn-box{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35);
-  border-radius:10px;padding:1rem;direction:rtl;text-align:right;
-  color:#fcd34d;margin:.6rem 0}
-.template-box{background:rgba(102,126,234,.08);border:2px dashed rgba(102,126,234,.4);
+.stApp{
+  background:linear-gradient(165deg,#0a1628 0%,#0f2847 40%,#0c4a6e 100%);
+  color:#e8f4fc;
+}
+.main{direction:rtl;text-align:right;color:#e8f4fc!important}
+.block-container{color:#e8f4fc!important}
+.title-card{
+  background:linear-gradient(135deg,#0e7490 0%,#0f766e 50%,#115e59 100%);
+  padding:1.75rem 2rem;border-radius:24px;text-align:center;
+  margin-bottom:1.5rem;box-shadow:0 16px 48px rgba(14,116,144,.42);
+  border:1px solid rgba(165,243,252,.25);
+}
+.title-card h1{color:#ecfeff;font-size:2.05rem;font-weight:800;margin:0;letter-spacing:.02em}
+.title-card p{color:rgba(236,254,255,.88);font-size:.96rem;margin:.45rem 0 0;line-height:1.65}
+.donia-robot-wrap{display:flex;justify-content:center;align-items:center;margin:1rem 0}
+.donia-robot{
+  width:88px;height:88px;border-radius:22px;
+  background:linear-gradient(180deg,#134e4a,#0f766e);
+  box-shadow:0 0 28px rgba(45,212,191,.55), inset 0 1px 0 rgba(255,255,255,.12);
+  display:flex;align-items:center;justify-content:center;
+  animation:doniaPulse 2.2s ease-in-out infinite;
+  border:2px solid rgba(94,234,212,.45);
+}
+.donia-robot svg{width:64px;height:64px;opacity:.95}
+@keyframes doniaPulse{
+  0%,100%{transform:scale(1);box-shadow:0 0 28px rgba(45,212,191,.45)}
+  50%{transform:scale(1.04);box-shadow:0 0 44px rgba(45,212,191,.85)}
+}
+.stat-card{background:linear-gradient(135deg,rgba(14,116,144,.22),rgba(15,118,110,.18));
+  border:1px solid rgba(94,234,212,.28);border-radius:16px;
+  padding:1.1rem;text-align:center;margin-bottom:.75rem}
+.stat-card h2{font-size:1.85rem;margin:0;color:#5eead4!important}
+.stat-card p{margin:0;color:rgba(226,232,240,.82);font-size:.86rem}
+.feature-card{background:rgba(15,23,42,.45);border:1px solid rgba(148,163,184,.2);
+  border-radius:16px;padding:1.25rem;margin:.55rem 0;
+  direction:rtl;text-align:right;color:rgba(248,250,252,.94)}
+.feature-card h4{color:#2dd4bf;margin:0 0 .45rem;font-size:1.02rem}
+.result-box{background:rgba(15,23,42,.4);border:1px solid rgba(148,163,184,.18);
+  border-radius:16px;padding:1.45rem;direction:rtl;text-align:right;
+  color:rgba(248,250,252,.94);line-height:2;margin:.85rem 0}
+.db-item{background:rgba(30,41,59,.5);border-right:4px solid #14b8a6;
+  border-radius:10px;padding:.85rem 1.05rem;margin:.45rem 0;
+  direction:rtl;text-align:right;color:rgba(248,250,252,.95)}
+.error-box{background:rgba(127,29,29,.25);border:1px solid rgba(248,113,113,.45);
   border-radius:12px;padding:1rem;direction:rtl;text-align:right;
-  color:rgba(255,255,255,.85);margin:.6rem 0;font-size:.9rem;line-height:1.8}
-div.stButton>button{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;
-  border:none;border-radius:10px;padding:.6rem 1.4rem;
-  font-weight:700;font-size:.9rem;width:100%;
-  transition:all .25s;box-shadow:0 4px 16px rgba(102,126,234,.4)}
-div.stButton>button:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(102,126,234,.6)}
+  color:#fecaca;margin:.65rem 0}
+.success-box{background:rgba(6,78,59,.28);border:1px solid rgba(52,211,153,.4);
+  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
+  color:#a7f3d0;margin:.65rem 0}
+.warn-box{background:rgba(120,53,15,.28);border:1px solid rgba(251,191,36,.4);
+  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
+  color:#fde68a;margin:.65rem 0}
+.template-box{background:rgba(14,116,144,.12);border:2px dashed rgba(45,212,191,.35);
+  border-radius:14px;padding:1.05rem;direction:rtl;text-align:right;
+  color:rgba(226,232,240,.9);margin:.65rem 0;font-size:.9rem;line-height:1.85}
+div.stButton>button{
+  background:linear-gradient(135deg,#0d9488,#0f766e)!important;color:#ecfeff!important;
+  border:none!important;border-radius:18px!important;
+  padding:0.85rem 1.65rem!important;min-height:3.1rem!important;
+  font-weight:800!important;font-size:1.02rem!important;width:100%!important;
+  transition:transform .22s, box-shadow .22s!important;
+  box-shadow:0 6px 22px rgba(13,148,136,.45)!important;
+}
+div.stButton>button:hover{
+  transform:translateY(-3px)!important;
+  box-shadow:0 12px 36px rgba(13,148,136,.65)!important;
+}
 .stSelectbox label,.stTextInput label,.stTextArea label,
-.stNumberInput label,.stSlider label,.stFileUploader label{
-  direction:rtl;text-align:right;color:rgba(255,255,255,.9)!important;font-weight:600}
-section[data-testid="stSidebar"]{direction:rtl}
+.stNumberInput label,.stSlider label,.stFileUploader label,.stRadio label{
+  direction:rtl;text-align:right;color:rgba(226,232,240,.95)!important;font-weight:600}
+section[data-testid="stSidebar"]{direction:rtl;background:linear-gradient(180deg,#0f172a,#0c1e2e)!important}
 section[data-testid="stSidebar"] .stMarkdown{text-align:right}
-.stTabs [data-baseweb="tab"]{direction:rtl;font-size:.88rem;font-weight:600}
-.grade-A{color:#10b981;font-weight:700}
-.grade-B{color:#3b82f6;font-weight:700}
-.grade-C{color:#f59e0b;font-weight:700}
-.grade-D{color:#ef4444;font-weight:700}
+.stTabs [data-baseweb="tab"]{direction:rtl;font-size:.9rem;font-weight:700}
+.grade-A{color:#34d399;font-weight:700}
+.grade-B{color:#38bdf8;font-weight:700}
+.grade-C{color:#fbbf24;font-weight:700}
+.grade-D{color:#f87171;font-weight:700}
 </style>
 """, unsafe_allow_html=True)
 
@@ -205,7 +306,8 @@ CURRICULUM = {
         "subjects": {
             "_default": ["اللغة العربية وآدابها", "الرياضيات",
                          "العلوم الفيزيائية والتكنولوجية", "العلوم الطبيعية والحياة",
-                         "التاريخ والجغرافيا", "التربية الإسلامية", "التربية المدنية",
+                         "التاريخ والجغرافيا", "الاجتماعيات",
+                         "التربية الإسلامية", "التربية المدنية",
                          "اللغة الفرنسية", "اللغة الإنجليزية",
                          "التربية التشكيلية", "التربية الموسيقية", "الإعلام الآلي"]
         },
@@ -239,6 +341,7 @@ CURRICULUM = {
                     "التاريخ والجغرافيا", "علم الاجتماع والنفس",
                     "اللغة الفرنسية", "اللغة الإنجليزية", "التربية الإسلامية"],
                 "شعبة لغات أجنبية": ["اللغة الفرنسية", "اللغة الإنجليزية",
+                    "اللغة الإسبانية", "اللغة الألمانية", "اللغة الإيطالية",
                     "اللغة العربية", "التاريخ والجغرافيا", "الفلسفة"],
                 "شعبة تسيير واقتصاد": ["الاقتصاد والمناجمنت", "المحاسبة والمالية",
                     "الرياضيات", "القانون", "اللغة العربية",
@@ -257,6 +360,7 @@ CURRICULUM = {
                     "التاريخ والجغرافيا", "علم الاجتماع والنفس",
                     "اللغة الفرنسية", "اللغة الإنجليزية", "التربية الإسلامية"],
                 "شعبة لغات أجنبية": ["اللغة الفرنسية", "اللغة الإنجليزية",
+                    "اللغة الإسبانية", "اللغة الألمانية", "اللغة الإيطالية",
                     "اللغة العربية", "التاريخ والجغرافيا", "الفلسفة"],
                 "شعبة تسيير واقتصاد": ["الاقتصاد والمناجمنت", "المحاسبة والمالية",
                     "الرياضيات", "القانون", "اللغة العربية",
@@ -389,23 +493,24 @@ def ar(txt) -> str:
 
 # ─── PDF helpers ────────────────────────────────────────────
 
-def generate_simple_pdf(content: str, title: str, subtitle: str = "") -> bytes:
+def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool = True) -> bytes:
     buf = io.BytesIO()
     _register_arabic_pdf_fonts()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.5*cm, leftMargin=1.5*cm,
                             topMargin=1.2*cm, bottomMargin=1.5*cm)
-    S = make_pdf_styles()
+    S = make_pdf_styles(rtl)
     story = []
+    align_hdr = "RIGHT" if rtl else "LEFT"
     head_tbl = Table(
-        [[Paragraph(ar("الجمهورية الجزائرية الديمقراطية الشعبية"), S["center"]),
-          Paragraph(ar("وزارة التربية الوطنية"), S["center"])],
-         [Paragraph(ar("DONIA SMART TEACHER — المعلم الذكي"), S["center"]),
-          Paragraph(ar("وثيقة رقمية — نسخة قابلة للطباعة"), S["center"])]],
+        [[Paragraph(pdf_text_line("الجمهورية الجزائرية الديمقراطية الشعبية", True), S["center"]),
+          Paragraph(pdf_text_line("وزارة التربية الوطنية", True), S["center"])],
+         [Paragraph(pdf_text_line("DONIA MIND — المعلم الذكي", True), S["center"]),
+          Paragraph(pdf_text_line("وثيقة رقمية — نسخة قابلة للطباعة", True), S["center"])]],
         colWidths=[8.2*cm, 8.2*cm],
     )
     head_tbl.setStyle(TableStyle([
-        ("ALIGN",        (0, 0), (-1, -1), "RIGHT"),
+        ("ALIGN",        (0, 0), (-1, -1), align_hdr),
         ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
         ("BOX",          (0, 0), (-1, -1), 0.5, rl_colors.black),
         ("BACKGROUND",   (0, 0), (-1, -1), rl_colors.HexColor("#f4f2ff")),
@@ -414,11 +519,11 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "") -> bytes:
     ]))
     story.append(head_tbl)
     story.append(Spacer(1, 8))
-    story.append(Paragraph(ar(f"DONIA SMART TEACHER  |  {title}"), S["title"]))
+    story.append(Paragraph(pdf_text_line(f"DONIA MIND  |  {title}", rtl), S["title"]))
     if subtitle:
-        story.append(Paragraph(ar(subtitle), S["center"]))
+        story.append(Paragraph(pdf_text_line(subtitle, rtl), S["center"]))
     story.append(HRFlowable(width="100%", thickness=1.5,
-                             color=rl_colors.HexColor("#764ba2")))
+                             color=rl_colors.HexColor("#0d9488")))
     story.append(Spacer(1, 10))
     for line in content.splitlines():
         line = line.strip()
@@ -426,11 +531,12 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "") -> bytes:
             continue
         if line.startswith("##"):
             story.append(Spacer(1, 6))
-            story.append(Paragraph(ar(line.replace("#", "")), S["h2"]))
+            story.append(Paragraph(pdf_text_line(line.replace("#", ""), rtl), S["h2"]))
         elif line.startswith("$") or "```" in line:
-            story.append(Paragraph(ar("[ معادلة – راجع النسخة الرقمية ]"), S["small"]))
+            msg = "[ معادلة – راجع النسخة الرقمية ]" if rtl else "[Equation — see digital version]"
+            story.append(Paragraph(pdf_text_line(msg, rtl), S["small"]))
         else:
-            story.append(Paragraph(ar(line), S["body"]))
+            story.append(Paragraph(pdf_text_line(line, rtl), S["body"]))
         story.append(Spacer(1, 2))
     doc.build(story)
     buf.seek(0)
@@ -442,24 +548,32 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.8*cm, leftMargin=1.8*cm,
                             topMargin=1.5*cm, bottomMargin=1.5*cm)
-    S = make_pdf_styles()
+    subj = exam_data.get("subject", "") or ""
+    rtl, lang = get_pdf_mode_for_subject(subj)
+    S = make_pdf_styles(rtl)
+    _register_arabic_pdf_fonts()
+    fn_b = _AR_FONT_BOLD if rtl else "Helvetica-Bold"
     story = []
 
-    header_data = [
-        [ar("الجمهورية الجزائرية الديمقراطية الشعبية"), ""],
-        [ar(f"متوسطة: {exam_data.get('school', '....................')}"),
-         ar("وزارة التربية الوطنية")],
-        [ar(f"مديرية التربية لولاية: {exam_data.get('wilaya', '..............')}"),
-         ar(f"السنة الدراسية: {exam_data.get('year', '2025/2026')}")],
-        [ar(f"المقاطعة: {exam_data.get('district', '.....')}  |  "
+    # رأس رسمي عربي دائماً — خلايا Paragraph بخط عربي مُسجَّل (Amiri/Cairo)
+    def _cell(txt: str) -> Paragraph:
+        return Paragraph(pdf_text_line(txt, True), make_pdf_styles(True)["body"])
+
+    header_data2 = [
+        [_cell("الجمهورية الجزائرية الديمقراطية الشعبية"), _cell("")],
+        [_cell(f"المؤسسة: {exam_data.get('school', '....................')}"),
+         _cell("وزارة التربية الوطنية")],
+        [_cell(f"مديرية التربية لولاية: {exam_data.get('wilaya', '..............')}"),
+         _cell(f"السنة الدراسية: {exam_data.get('year', '2025/2026')}")],
+        [_cell(
+            f"المقاطعة: {exam_data.get('district', '.....')}  |  "
             f"المستوى: {exam_data.get('grade', '')}  |  "
-            f"المدة: {exam_data.get('duration', 'ساعتان')}"), ""],
+            f"المدة: {exam_data.get('duration', 'ساعتان')}"), _cell("")],
     ]
-    t = Table(header_data, colWidths=[10*cm, 6.5*cm])
+    t = Table(header_data2, colWidths=[10*cm, 6.5*cm])
     t.setStyle(TableStyle([
         ('ALIGN',      (0, 0), (-1, -1), 'RIGHT'),
-        ('FONTNAME',   (0, 0), (-1, -1), 'Helvetica-Bold'),
-        ('FONTSIZE',   (0, 0), (-1, -1), 10),
+        ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
         ('SPAN',       (0, 0), (1, 0)),
         ('SPAN',       (0, 3), (1, 3)),
         ('GRID',       (0, 0), (-1, -1), 0.5, rl_colors.black),
@@ -470,40 +584,51 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
 
     # FIX-2: نمط مُحدَّد بالكامل بدون underlineWidth (غير مدعوم في بعض الإصدارات)
     title_style = ParagraphStyle(
-        "exam_etitle",
-        fontName="Helvetica-Bold", fontSize=14,
+        "exam_etitle_" + ("rtl" if rtl else "ltr"),
+        fontName=fn_b if rtl else "Helvetica-Bold", fontSize=14,
         alignment=TA_CENTER, leading=20,
         textColor=rl_colors.HexColor("#000000"))
-    story.append(Paragraph(
-        ar(f"اختبار {exam_data.get('semester', 'الفصل الثاني')} "
-           f"في مادة {exam_data.get('subject', '')}"),
-        title_style))
+    if rtl:
+        exam_title = (
+            f"اختبار {exam_data.get('semester', 'الفصل الثاني')} "
+            f"في مادة {exam_data.get('subject', '')}"
+        )
+    else:
+        exam_title = (
+            f"Exam — {exam_data.get('semester', '')} — "
+            f"{lang} / {exam_data.get('subject', '')}"
+        )
+    story.append(Paragraph(pdf_text_line(exam_title, rtl), title_style))
     story.append(HRFlowable(width="100%", thickness=1.5, color=rl_colors.black))
     story.append(Spacer(1, 10))
 
     # FIX-2: نمط العنوان الفرعي بدون underlineWidth
     exhead_style = ParagraphStyle(
-        "exam_exhead",
-        fontName="Helvetica-Bold", fontSize=12,
-        alignment=TA_RIGHT, leading=18,
+        "exam_exhead_" + ("rtl" if rtl else "ltr"),
+        fontName=fn_b if rtl else "Helvetica-Bold", fontSize=12,
+        alignment=(TA_RIGHT if rtl else TA_LEFT), leading=18,
         textColor=rl_colors.HexColor("#000000"))
 
     for line in exam_data.get('content', '').splitlines():
         line = line.strip()
         if not line:
             continue
-        if re.match(r'^تمرين\s+\d+', line) or re.match(r'^الوضعية الإدماجية', line):
+        if (re.match(r'^تمرين\s+\d+', line) or re.match(r'^الوضعية الإدماجية', line)
+                or re.match(r'^(Exercise|Part|Situation)\s*\d*', line, re.I)):
             story.append(Spacer(1, 6))
-            story.append(Paragraph(ar(line), exhead_style))
+            story.append(Paragraph(pdf_text_line(line, rtl), exhead_style))
         elif line.startswith("$") or "```" in line:
-            story.append(Paragraph(ar("[معادلة]"), S["small"]))
+            msg = "[معادلة]" if rtl else "[Equation]"
+            story.append(Paragraph(pdf_text_line(msg, rtl), S["small"]))
         else:
-            story.append(Paragraph(ar(line), S["body"]))
+            story.append(Paragraph(pdf_text_line(line, rtl), S["body"]))
         story.append(Spacer(1, 2))
 
     story.append(Spacer(1, 12))
-    story.append(Paragraph(ar("انتهى — بالتوفيق والنجاح"),
-                            ParagraphStyle("exam_end", fontName="Helvetica-Bold",
+    end_msg = "انتهى — بالتوفيق والنجاح" if rtl else "— End — Good luck"
+    story.append(Paragraph(pdf_text_line(end_msg, rtl),
+                            ParagraphStyle("exam_end_" + ("rtl" if rtl else "ltr"),
+                                           fontName=fn_b if rtl else "Helvetica-Bold",
                                            fontSize=11, alignment=TA_CENTER)))
     doc.build(story)
     buf.seek(0)
@@ -515,7 +640,10 @@ def generate_report_pdf(report_data: dict) -> bytes:
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.5*cm, leftMargin=1.5*cm,
                             topMargin=1.5*cm, bottomMargin=1.5*cm)
-    S = make_pdf_styles()
+    _register_arabic_pdf_fonts()
+    fn_pdf = _AR_FONT_MAIN
+    fb_pdf = _AR_FONT_BOLD
+    S = make_pdf_styles(True)
     story = []
 
     story.append(Paragraph(ar("تحليل نتائج الأقسام"), S["title"]))
@@ -525,7 +653,7 @@ def generate_report_pdf(report_data: dict) -> bytes:
            f"{report_data.get('semester', '')}"),
         S["center"]))
     story.append(HRFlowable(width="100%", thickness=1.5,
-                             color=rl_colors.HexColor("#764ba2")))
+                             color=rl_colors.HexColor("#0d9488")))
     story.append(Spacer(1, 12))
 
     for cls in report_data.get('classes', []):
@@ -550,7 +678,7 @@ def generate_report_pdf(report_data: dict) -> bytes:
             t = Table(top_data, colWidths=[2*cm, 10*cm, 3*cm])
             t.setStyle(TableStyle([
                 ('ALIGN',       (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME',    (0, 0), (-1, 0),  'Helvetica-Bold'),
+                ('FONTNAME',    (0, 0), (-1, 0),  fb_pdf),
                 ('BACKGROUND',  (0, 0), (-1, 0),  rl_colors.HexColor("#667eea")),
                 ('TEXTCOLOR',   (0, 0), (-1, 0),  rl_colors.white),
                 ('GRID',        (0, 0), (-1, -1), 0.5, rl_colors.grey),
@@ -571,7 +699,7 @@ def generate_report_pdf(report_data: dict) -> bytes:
             t = Table(dist_data, colWidths=[4*cm]*4)
             t.setStyle(TableStyle([
                 ('ALIGN',      (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME',   (0, 0), (-1, 0),  'Helvetica-Bold'),
+                ('FONTNAME',   (0, 0), (-1, 0),  fb_pdf),
                 ('BACKGROUND', (0, 0), (-1, 0),  rl_colors.HexColor("#302b63")),
                 ('TEXTCOLOR',  (0, 0), (-1, 0),  rl_colors.white),
                 ('GRID',       (0, 0), (-1, -1), 0.5, rl_colors.grey),
@@ -688,16 +816,37 @@ def parse_grade_book_excel(uploaded_file) -> list:
       - الملفات التي تبدأ ببيانات قبل العنوان
       - الصفوف التي تحتوي على None جزئياً
       - الملفات ذات الفتارات (blank rows) المتعددة
+      - .xlsx عبر openpyxl، مع fallback إلى pandas عند الحاجة
     """
-    wb = openpyxl.load_workbook(uploaded_file, data_only=True)
-    ws = wb.active
     students = []
     data_started = False
+    rows_list = []
+    try:
+        uploaded_file.seek(0)
+        wb = openpyxl.load_workbook(uploaded_file, data_only=True)
+        ws = wb.active
+        rows_list = list(ws.iter_rows(values_only=True))
+    except Exception:
+        uploaded_file.seek(0)
+        raw = uploaded_file.read()
+        bio = io.BytesIO(raw)
+        name = (getattr(uploaded_file, "name", "") or "").lower()
+        try:
+            df = pd.read_excel(bio, engine="openpyxl", header=None)
+        except Exception:
+            bio.seek(0)
+            try:
+                eng = "xlrd" if name.endswith(".xls") and not name.endswith(".xlsx") else None
+                df = pd.read_excel(bio, engine=eng, header=None) if eng else pd.read_excel(bio, header=None)
+            except Exception:
+                bio.seek(0)
+                df = pd.read_excel(bio, header=None)
+        rows_list = [tuple(row) for row in df.values]
 
     HEADER_MARKERS = {'matricule', 'رقم التعريف', 'اللقب', 'nom', 'prénom',
                       'الاسم', 'تقويم', 'فرض', 'اختبار', 'taqwim'}
 
-    for i, row in enumerate(ws.iter_rows(values_only=True), 1):
+    for i, row in enumerate(rows_list, 1):
         if not any(c is not None for c in row):
             continue  # صف فارغ — تجاوُز
 
@@ -767,38 +916,47 @@ def build_class_stats(stus: list, cls_name: str) -> dict:
 # ─── Lesson Plan PDF (النموذج الرسمي للمذكرة) ───────────────
 def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     buf = io.BytesIO()
+    _register_arabic_pdf_fonts()
+    rtl, _ = get_pdf_mode_for_subject(plan_data.get("subject", "") or "")
+    S_ar = make_pdf_styles(True)
+    S = make_pdf_styles(rtl)
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.2*cm, leftMargin=1.2*cm,
                             topMargin=1.2*cm, bottomMargin=1.2*cm)
-    S = make_pdf_styles()
     story = []
 
     story.append(Paragraph(
-        ar("الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"),
-        S["center"]))
+        pdf_text_line("الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية", True),
+        S_ar["center"]))
     story.append(Paragraph(
-        ar(f"مذكرة رقم: ____  |  المؤسسة: {plan_data.get('school', '.............')}  "
-           f"|  الأستاذ(ة): {plan_data.get('teacher', '.............')}"),
-        S["center"]))
+        pdf_text_line(
+            f"مذكرة رقم: ____  |  المؤسسة: {plan_data.get('school', '.............')}  "
+            f"|  الأستاذ(ة): {plan_data.get('teacher', '.............')}", True),
+        S_ar["center"]))
     story.append(HRFlowable(width="100%", thickness=1.5,
-                             color=rl_colors.HexColor("#764ba2")))
+                             color=rl_colors.HexColor("#0d9488")))
     story.append(Spacer(1, 6))
 
     info_data = [
-        [ar("الميدان"),          ar(plan_data.get('domain', '')),
-         ar("المستوى"),          ar(plan_data.get('grade', ''))],
-        [ar("الباب / الوحدة"),   ar(plan_data.get('chapter', '')),
-         ar("المدة الزمنية"),    ar(plan_data.get('duration', '50 دقيقة'))],
-        [ar("المورد المعرفي"),   ar(plan_data.get('lesson', '')),
-         ar("نوع الحصة"),        ar(plan_data.get('session_type', 'درس نظري'))],
-        [ar("مستوى من الكفاءة"), ar(plan_data.get('competency', '')), "", ""],
+        [Paragraph(pdf_text_line("الميدان", True), S_ar["body"]),
+         Paragraph(pdf_text_line(plan_data.get('domain', ''), rtl), S["body"]),
+         Paragraph(pdf_text_line("المستوى", True), S_ar["body"]),
+         Paragraph(pdf_text_line(plan_data.get('grade', ''), rtl), S["body"])],
+        [Paragraph(pdf_text_line("الباب / الوحدة", True), S_ar["body"]),
+         Paragraph(pdf_text_line(plan_data.get('chapter', ''), rtl), S["body"]),
+         Paragraph(pdf_text_line("المدة الزمنية", True), S_ar["body"]),
+         Paragraph(pdf_text_line(plan_data.get('duration', '50 دقيقة'), rtl), S["body"])],
+        [Paragraph(pdf_text_line("المورد المعرفي", True), S_ar["body"]),
+         Paragraph(pdf_text_line(plan_data.get('lesson', ''), rtl), S["body"]),
+         Paragraph(pdf_text_line("نوع الحصة", True), S_ar["body"]),
+         Paragraph(pdf_text_line(plan_data.get('session_type', 'درس نظري'), rtl), S["body"])],
+        [Paragraph(pdf_text_line("مستوى من الكفاءة", True), S_ar["body"]),
+         Paragraph(pdf_text_line(plan_data.get('competency', ''), rtl), S["body"]),
+         "", ""],
     ]
     t = Table(info_data, colWidths=[3.5*cm, 7*cm, 3.5*cm, 3.5*cm])
     t.setStyle(TableStyle([
         ('ALIGN',      (0, 0), (-1, -1), 'RIGHT'),
-        ('FONTNAME',   (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTNAME',   (0, 0), (0, -1),  'Helvetica-Bold'),
-        ('FONTNAME',   (2, 0), (2, -2),  'Helvetica-Bold'),
         ('FONTSIZE',   (0, 0), (-1, -1), 10),
         ('GRID',       (0, 0), (-1, -1), 0.5, rl_colors.black),
         ('BACKGROUND', (0, 0), (0, -1),  rl_colors.HexColor("#e8e8ff")),
@@ -808,8 +966,12 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     story.append(t)
     story.append(Spacer(1, 6))
 
-    lesson_header = [ar("المراحل"), ar("المدة"), ar("سير الدرس"), ar("التقويم والإرشادات")]
-    lesson_rows   = [lesson_header]
+    lesson_rows = [[
+        Paragraph(pdf_text_line("المراحل", True), S_ar["body"]),
+        Paragraph(pdf_text_line("المدة", True), S_ar["body"]),
+        Paragraph(pdf_text_line("سير الدرس", True), S_ar["body"]),
+        Paragraph(pdf_text_line("التقويم والإرشادات", True), S_ar["body"]),
+    ]]
 
     sections = [
         ("تهيئة",              plan_data.get('duration_t', '5 د'),  plan_data.get('intro', '')),
@@ -817,18 +979,17 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
         ("إعادة الاستثمار",    plan_data.get('duration_r', '15 د'), plan_data.get('reinvest', '')),
     ]
     for section, dur, content in sections:
-        # wrap in Paragraph for proper RTL text wrap inside cells
         lesson_rows.append([
-            Paragraph(ar(section), S["body"]),
-            Paragraph(ar(dur),     S["body"]),
-            Paragraph(ar(str(content)[:400]), S["body"]),
-            Paragraph(ar(plan_data.get('eval', '')), S["body"]),
+            Paragraph(pdf_text_line(section, True), S_ar["body"]),
+            Paragraph(pdf_text_line(dur, rtl), S["body"]),
+            Paragraph(pdf_text_line(str(content)[:400], rtl), S["body"]),
+            Paragraph(pdf_text_line(plan_data.get('eval', ''), rtl), S["body"]),
         ])
     lesson_rows.append([
-        Paragraph(ar("الواجب المنزلي"), S["body"]),
-        "",
-        Paragraph(ar(plan_data.get('homework', '')), S["body"]),
-        "",
+        Paragraph(pdf_text_line("الواجب المنزلي", True), S_ar["body"]),
+        Paragraph("", S_ar["body"]),
+        Paragraph(pdf_text_line(plan_data.get('homework', ''), rtl), S["body"]),
+        Paragraph("", S_ar["body"]),
     ])
 
     col_widths = [2.5*cm, 1.5*cm, 10*cm, 3.5*cm]
@@ -836,14 +997,13 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     lt.setStyle(TableStyle([
         ('ALIGN',       (0, 0), (-1, -1), 'RIGHT'),
         ('VALIGN',      (0, 0), (-1, -1), 'TOP'),
-        ('FONTNAME',    (0, 0), (-1, 0),  'Helvetica-Bold'),
         ('FONTSIZE',    (0, 0), (-1, -1), 9),
-        ('BACKGROUND',  (0, 0), (-1, 0),  rl_colors.HexColor("#764ba2")),
+        ('BACKGROUND',  (0, 0), (-1, 0),  rl_colors.HexColor("#0f766e")),
         ('TEXTCOLOR',   (0, 0), (-1, 0),  rl_colors.white),
         ('GRID',        (0, 0), (-1, -1), 0.5, rl_colors.black),
-        ('BACKGROUND',  (0, 1), (0, -1),  rl_colors.HexColor("#f0f0ff")),
+        ('BACKGROUND',  (0, 1), (0, -1),  rl_colors.HexColor("#f0fdfa")),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1),
-         [rl_colors.white, rl_colors.HexColor("#f8f8ff")]),
+         [rl_colors.white, rl_colors.HexColor("#f8fafc")]),
         # FIX: WORDWRAP حُذف (غير مدعوم)، نستخدم Paragraph بدلاً منه
         # FIX: ROWHEIGHT بتنسيق صحيح لصفوف المحتوى (ارتفاع أدنى)
         ('MINROWHEIGHT', (0, 1), (-1, -2), 60),
@@ -852,14 +1012,17 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     story.append(Spacer(1, 6))
 
     pre_data = [
-        [ar("المكتسبات القبلية"), ar(plan_data.get('prerequisites', ''))],
-        [ar("الوسائل والأدوات"),  ar(plan_data.get('tools', 'الكتاب المدرسي، السبورة، دليل الأستاذ'))],
-        [ar("نقد ذاتي"),          ar(plan_data.get('self_critique', ''))],
+        [Paragraph(pdf_text_line("المكتسبات القبلية", True), S_ar["body"]),
+         Paragraph(pdf_text_line(plan_data.get('prerequisites', ''), rtl), S["body"])],
+        [Paragraph(pdf_text_line("الوسائل والأدوات", True), S_ar["body"]),
+         Paragraph(pdf_text_line(
+             plan_data.get('tools', 'الكتاب المدرسي، السبورة، دليل الأستاذ'), rtl), S["body"])],
+        [Paragraph(pdf_text_line("نقد ذاتي", True), S_ar["body"]),
+         Paragraph(pdf_text_line(plan_data.get('self_critique', ''), rtl), S["body"])],
     ]
     pt = Table(pre_data, colWidths=[3.5*cm, 14*cm])
     pt.setStyle(TableStyle([
         ('ALIGN',      (0, 0), (-1, -1), 'RIGHT'),
-        ('FONTNAME',   (0, 0), (0, -1),  'Helvetica-Bold'),
         ('FONTSIZE',   (0, 0), (-1, -1), 9),
         ('GRID',       (0, 0), (-1, -1), 0.5, rl_colors.black),
         ('BACKGROUND', (0, 0), (0, -1),  rl_colors.HexColor("#e8e8ff")),
@@ -892,7 +1055,9 @@ with st.sidebar:
         subj_list = []
     subject    = (st.selectbox("📖 المادة", subj_list) if subj_list
                   else st.text_input("📖 المادة", key="sb_subject"))
-    model_name = st.selectbox("🤖 النموذج", GROQ_MODELS)
+    # واجهة احترافية: لا عرض لاسم نموذج الذكاء الاصطناعي (يُضبط عبر متغير البيئة GROQ_MODEL)
+    # GROQ_MODELS يُبقى في الكود مرجعاً داخلياً دون عرض في الواجهة العامة
+    # model_name = st.selectbox("🤖 النموذج", GROQ_MODELS)
 
     st.markdown("---")
     st.markdown("**🏫 معلومات المؤسسة**")
@@ -918,13 +1083,30 @@ with st.sidebar:
         firebase_json = st.text_area("مفتاح Firebase (JSON)", height=60,
                                       placeholder='{"type":"service_account",...}')
 
+# نموذج التوليد الافتراضي (غير معروض في الواجهة — FIX أمان واجهة)
+model_name = DEFAULT_GROQ_MODEL
+
 # ═══════════════════════════════════════════════════════════
 # HEADER
 # ═══════════════════════════════════════════════════════════
 st.markdown("""
 <div class="title-card">
-    <h1>🎓 DONIA SMART TEACHER</h1>
-    <p>المعلم الذكي للمنظومة التربوية الجزائرية · مذكرات · اختبارات · دفتر التنقيط · تحليل النتائج · تصحيح الأوراق</p>
+    <h1>DONIA MIND — المعلم الذكي</h1>
+    <div class="donia-robot-wrap" aria-hidden="true">
+      <div class="donia-robot" title="مساعدك التربوي">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <rect x="12" y="14" width="40" height="36" rx="10" fill="#ccfbf1" stroke="#0d9488" stroke-width="2"/>
+          <circle cx="26" cy="30" r="5" fill="#0f766e"/>
+          <circle cx="38" cy="30" r="5" fill="#0f766e"/>
+          <circle cx="26.5" cy="29.5" r="1.5" fill="#ecfeff"/>
+          <circle cx="38.5" cy="29.5" r="1.5" fill="#ecfeff"/>
+          <path d="M24 42 Q32 48 40 42" stroke="#0f766e" stroke-width="2" fill="none" stroke-linecap="round"/>
+          <rect x="28" y="6" width="8" height="10" rx="2" fill="#5eead4"/>
+          <ellipse cx="32" cy="54" rx="14" ry="4" fill="rgba(45,212,191,.35)"/>
+        </svg>
+      </div>
+    </div>
+    <p>منصة تعليمية للمنظومة الجزائرية · مذكرات · اختبارات · تنقيط · تحليل · تصحيح</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -990,6 +1172,8 @@ with tab_plan:
 • المكتسبات القبلية: {plan_prereq}
 {f"• ملاحظات: {plan_notes}" if plan_notes.strip() else ""}
 
+{llm_output_language_clause(subject)}
+
 أعدّ المذكرة بهذا الهيكل:
 
 ## الكفاءة الختامية
@@ -1036,6 +1220,7 @@ with tab_plan:
                         "grade": f"{grade}{branch_txt}", "domain": plan_domain,
                         "chapter": plan_chapter, "lesson": plan_lesson,
                         "session_type": plan_session, "duration": plan_dur,
+                        "subject": subject,
                         "duration_t": "5 د", "duration_b": "25 د", "duration_r": "15 د",
                         "competency":    extract_section(plan_text, "مستوى من الكفاءة"),
                         "intro":         extract_section(plan_text, "مرحلة التهيئة"),
@@ -1128,6 +1313,8 @@ with tab_exam:
 • المجموع: 20 نقطة
 {f"• ملاحظات: {exam_notes}" if exam_notes.strip() else ""}
 
+{llm_output_language_clause(subject)}
+
 أعدّ الاختبار بهذا الهيكل الدقيق:
 
 تمرين 1 :( {pts[0].strip() if pts else '3'} نقاط)
@@ -1149,9 +1336,16 @@ with tab_exam:
 {"انتهى — بالتوفيق والنجاح" if include_integrate else ""}
 
 القواعد الإلزامية:
-- اللغة العربية الفصحى
-- المعادلات بتنسيق LaTeX
-- الأسئلة مرقمة ومتدرجة في الصعوبة"""
+""" + (
+"""• اللغة العربية الفصحى للنصوص التعليمية
+• المعادلات بتنسيق LaTeX
+• الأسئلة مرقمة ومتدرجة في الصعوبة"""
+    if get_pdf_mode_for_subject(subject)[0] else
+"""• Use ONLY the target foreign language for all instructional text (see rule above)
+• Equations in LaTeX where appropriate
+• Numbered questions, progressive difficulty"""
+) + """
+"""
 
             with st.spinner("📄 جاري توليد الاختبار…"):
                 try:
@@ -1422,6 +1616,8 @@ with tab_report:
 {summary}
 المادة: {rep_subject} | {rep_semester} | المستوى: {grade}{branch_txt}
 
+{llm_output_language_clause(rep_subject)}
+
 قدّم تقريراً شاملاً يتضمن:
 1. التشخيص العام للمستوى
 2. مقارنة بين الأقسام (نقاط القوة والضعف)
@@ -1491,6 +1687,8 @@ with tab_ex:
 • المادة: {subject} | الدرس: {lesson} | الصعوبة: {difficulty}
 {f"• ملاحظات: {extra}" if extra.strip() else ""}
 
+{llm_output_language_clause(subject)}
+
 الهيكل المطلوب:
 ## التمرين
 [المعطيات والمطلوب بوضوح]
@@ -1517,7 +1715,9 @@ with tab_ex:
                         st.download_button("📥 نص", res_text.encode("utf-8-sig"),
                                            f"{lesson}.txt", key="dl_ex_txt")
                     with d2:
-                        pdf_ex = generate_simple_pdf(res_text, lesson, f"{subject} | {grade}")
+                        pdf_ex = generate_simple_pdf(
+                            res_text, lesson, f"{subject} | {grade}",
+                            rtl=get_pdf_mode_for_subject(subject)[0])
                         st.download_button("📄 PDF", pdf_ex, f"{lesson}.pdf",
                                            "application/pdf", key="dl_ex_pdf")
                 except Exception as err:
@@ -1530,7 +1730,8 @@ with tab_ex:
 with tab_correct:
     st.markdown("### ✅ تصحيح أوراق الاختبار")
     correct_mode = st.radio("وضع التصحيح:",
-                             ["📝 إدخال نصي", "📋 التحقق من إجابة وفق نموذج الحل"],
+                             ["📝 إدخال نصي", "📋 التحقق من إجابة وفق نموذج الحل",
+                              "📷 صورة ورقة (كاميرا أو ملف)"],
                              horizontal=True, key="correct_mode")
 
     cc1, cc2 = st.columns(2)
@@ -1543,11 +1744,45 @@ with tab_correct:
                                       ["تصحيح شامل مع تعليقات", "تصحيح مختصر",
                                        "تحديد الأخطاء فقط"], key="corr_style")
 
-    model_answer   = st.text_area("✍️ الحل النموذجي / السؤال:", height=120,
+    model_answer = st.text_area("✍️ الحل النموذجي / السؤال:", height=120,
                                    key="corr_model_ans",
                                    placeholder="أدخل السؤال أو الحل النموذجي…")
-    student_answer = st.text_area("📄 إجابة الطالب:", height=120, key="corr_student_ans",
-                                   placeholder="انسخ إجابة الطالب هنا…")
+
+    if correct_mode == "📷 صورة ورقة (كاميرا أو ملف)":
+        st.markdown("**معاينة الصورة قبل المعالجة**")
+        img_col1, img_col2 = st.columns(2)
+        with img_col1:
+            cam_shot = st.camera_input("📷 الكاميرا المباشرة", key="corr_camera")
+        with img_col2:
+            up_img = st.file_uploader("📁 رفع صورة (PNG / JPG / JPEG / WEBP)",
+                                       type=["png", "jpg", "jpeg", "webp"],
+                                       key="corr_file_img")
+        preview_bytes = None
+        if cam_shot is not None:
+            preview_bytes = cam_shot.getvalue()
+            st.image(cam_shot, caption="معاينة — الكاميرا", use_container_width=True)
+        elif up_img is not None:
+            preview_bytes = up_img.read()
+            st.image(preview_bytes, caption="معاينة — الملف", use_container_width=True)
+        if preview_bytes and st.button("🔍 استخراج النص من الصورة (OCR)", key="btn_ocr"):
+            ocr_extra = ocr_answer_sheet_image(preview_bytes)
+            if ocr_extra.strip():
+                st.session_state["corr_student_ans"] = ocr_extra
+                st.success("✅ تم استخراج نص من الصورة — يمكنك تعديله في الحقل أدناه.")
+                st.rerun()
+            else:
+                st.warning(
+                    "⚠️ لم يُستخرج نص (ثبّت pytesseract و Tesseract، أو انسخ النص يدوياً)."
+                )
+
+    ta_h = 160 if correct_mode == "📷 صورة ورقة (كاميرا أو ملف)" else 120
+    ph = (
+        "الصق إجابة الطالب أو استخدم الاستخراج من الصورة…"
+        if correct_mode == "📷 صورة ورقة (كاميرا أو ملف)"
+        else "انسخ إجابة الطالب هنا…"
+    )
+    student_answer = st.text_area(
+        "📄 إجابة الطالب:", height=ta_h, key="corr_student_ans", placeholder=ph)
 
     if st.button("✅ تصحيح الإجابة", key="btn_correct"):
         if not api_key:
@@ -1588,7 +1823,8 @@ with tab_correct:
                          correction, datetime.now().strftime("%Y-%m-%d %H:%M")))
                     st.success(f"✅ العلامة: {gv}/{total_marks}")
                     pdf_c = generate_simple_pdf(
-                        correction, f"تصحيح: {student_name or 'طالب'}", exam_subj)
+                        correction, f"تصحيح: {student_name or 'طالب'}", exam_subj,
+                        rtl=get_pdf_mode_for_subject(exam_subj)[0])
                     st.download_button("📄 تحميل التصحيح PDF", pdf_c,
                                        f"تصحيح_{student_name or 'طالب'}.pdf",
                                        "application/pdf", key="dl_corr_pdf")
@@ -1621,7 +1857,7 @@ with tab_archive:
                     st.download_button("📥 نص", cont.encode("utf-8-sig"),
                                        f"{les}.txt", key=f"dl_{ex_id}")
                 with b2:
-                    px2 = generate_simple_pdf(cont, les)
+                    px2 = generate_simple_pdf(cont, les, rtl=get_pdf_mode_for_subject(sub)[0])
                     st.download_button("📄 PDF", px2, f"{les}.pdf",
                                        "application/pdf", key=f"pdf_{ex_id}")
                 with b3:
@@ -1668,7 +1904,8 @@ with tab_archive:
                     st.download_button("📥 نص", cont.encode("utf-8-sig"),
                                        f"مذكرة_{les}.txt", key=f"pln_{pid}")
                 with pp2:
-                    ppdf = generate_simple_pdf(cont, f"مذكرة: {les}", f"{sub} | {gr}")
+                    ppdf = generate_simple_pdf(cont, f"مذكرة: {les}", f"{sub} | {gr}",
+                        rtl=get_pdf_mode_for_subject(sub)[0])
                     st.download_button("📄 PDF", ppdf, f"مذكرة_{les}.pdf",
                                        "application/pdf", key=f"ppdf_{pid}")
 
