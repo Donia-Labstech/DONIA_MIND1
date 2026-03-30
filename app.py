@@ -1,5 +1,5 @@
 """
-DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — نسخة تطوير شاملة
+DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v2.0
 المعلم الذكي للمنظومة التربوية الجزائرية
 ═══════════════════════════════════════════════════════════
 إصلاحات وتحسينات:
@@ -10,8 +10,10 @@ DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — نسخة تط
   FIX-5 [dir() vs locals()]: استبدال dir() بـ متغيرات مُعرَّفة مسبقاً
   FIX-6 [Excel parsing]    : parse_grade_book_excel + أوراق متعددة (دمج / اختيار ورقة) + pandas/xlrd
   UX-1  : ثيم احترافي، أزرار كبيرة، آفاتار روبوت، إخفاء اسم نموذج الذكاء الاصطناعي عن الواجهة
+  UX-2  : هوية جزائرية — ألوان العلم (أخضر/أبيض/أحمر)، علم متحرك، رسالة ترحيب
   I18N  : مواد لغوية أجنبية — توليد وPDF باتجاه LTR عند الحاجة
   OCR   : معاينة صور أوراق الإجابة + استخراج نص اختياري (pytesseract)
+  SEC   : واجهة مفتاح API آمنة (كتاب مفتوح + "العلم هو السلاح")
 ═══════════════════════════════════════════════════════════
 """
 import streamlit as st
@@ -57,7 +59,13 @@ DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # حماية الملكية الفكرية — تظهر في الواجهة وفي تذييل كل PDF
 COPYRIGHT_FOOTER_AR = (
-    "جميع حقوق الملكية محفوظة لمختبر الأفكار الذكية والتكنولوجيا - DONIA LABS TECH © 2026"
+    "جميع حقوق الملكية محفوظة حصرياً لمختبر DONIA LABS TECH © 2026"
+)
+
+# رسالة الترحيب الرئيسية
+WELCOME_MESSAGE_AR = (
+    "أهلاً بك أستاذنا القدير في رحاب DONIA MIND.. "
+    "معاً نصنع مستقبل التعليم الجزائري بذكاء واحترافية."
 )
 
 # روابط التواصل (يمكن تجاوزها عبر متغيرات البيئة)
@@ -230,98 +238,204 @@ st.set_page_config(page_title="DONIA MIND — المعلم الذكي", page_ico
                    layout="wide", initial_sidebar_state="expanded")
 
 # ═══════════════════════════════════════════════════════════
-# CSS — ثيم تقني مريح للعين، تباين عالٍ، أزرار كبيرة وزوايا دائرية
+# CSS — الهوية البصرية الجزائرية الوطنية v2.0
 # ═══════════════════════════════════════════════════════════
 st.markdown("""
 <style>
+/* ═══════════════════════════════════════════════════════════
+   DONIA MIND v2.0 — الهوية البصرية الجزائرية الوطنية
+   الألوان: أخضر زمردي / أبيض ناصع / أحمر عليزاران
+   ═══════════════════════════════════════════════════════════ */
 @import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;800&display=swap');
+
+/* إخفاء شعار Streamlit وزر GitHub تماماً */
+#MainMenu{visibility:hidden!important}
+footer{visibility:hidden!important}
+header{visibility:hidden!important}
+.stDeployButton{display:none!important}
+[data-testid="stToolbar"]{display:none!important}
+[data-testid="stDecoration"]{display:none!important}
+[data-testid="stStatusWidget"]{display:none!important}
+a[href*="streamlit.io"]{display:none!important}
+
 *,*::before,*::after{font-family:'Cairo','Amiri','Tajawal',sans-serif!important}
+
+/* خلفية بيضاء ناصعة — مساحة العمل */
 .stApp{
-  background:linear-gradient(165deg,#0a1628 0%,#0f2847 40%,#0c4a6e 100%);
-  color:#e8f4fc;
+  background:#ffffff;
+  color:#111111;
 }
-.main{direction:rtl;text-align:right;color:#e8f4fc!important}
-.block-container{color:#e8f4fc!important}
+.main{direction:rtl;text-align:right;color:#111111!important}
+.block-container{color:#111111!important;background:#ffffff;}
+
+/* العناوين الرئيسية h1 — اللون الأحمر */
+h1{color:#c0392b!important;font-weight:800!important}
+/* العناوين الفرعية h2/h3 — اللون الأخضر */
+h2{color:#145a32!important;font-weight:700!important}
+h3{color:#1e8449!important;font-weight:700!important}
+
+/* بطاقة العنوان الرئيسية — تدرج جزائري */
 .title-card{
-  background:linear-gradient(135deg,#0e7490 0%,#0f766e 50%,#115e59 100%);
+  background:linear-gradient(135deg,#145a32 0%,#1e8449 50%,#27ae60 100%);
   padding:1.75rem 2rem;border-radius:24px;text-align:center;
-  margin-bottom:1.5rem;box-shadow:0 16px 48px rgba(14,116,144,.42);
-  border:1px solid rgba(165,243,252,.25);
+  margin-bottom:1rem;box-shadow:0 16px 48px rgba(20,90,50,.45);
+  border:3px solid #c0392b;
 }
-.title-card h1{color:#ecfeff;font-size:2.05rem;font-weight:800;margin:0;letter-spacing:.02em}
-.title-card p{color:rgba(236,254,255,.88);font-size:.96rem;margin:.45rem 0 0;line-height:1.65}
-.donia-robot-wrap{display:flex;justify-content:center;align-items:center;margin:1rem 0}
+.title-card h1{color:#ffffff!important;font-size:2.05rem;font-weight:800;margin:0;letter-spacing:.02em}
+.title-card p{color:rgba(255,255,255,.92);font-size:.96rem;margin:.45rem 0 0;line-height:1.65}
+
+/* رسالة الترحيب */
+.welcome-banner{
+  background:linear-gradient(135deg,#fdfefe,#f9f9f9);
+  border:2px solid #27ae60;border-left:8px solid #c0392b;
+  border-radius:14px;padding:1.1rem 1.5rem;margin:.75rem 0 1.25rem;
+  direction:rtl;text-align:right;
+  font-size:1.05rem;font-weight:600;color:#145a32;
+  box-shadow:0 4px 16px rgba(20,90,50,.12);
+}
+
+/* روبوت آفاتار */
+.donia-robot-wrap{display:flex;justify-content:center;align-items:center;margin:.75rem 0}
 .donia-robot{
   width:88px;height:88px;border-radius:22px;
-  background:linear-gradient(180deg,#134e4a,#0f766e);
-  box-shadow:0 0 28px rgba(45,212,191,.55), inset 0 1px 0 rgba(255,255,255,.12);
+  background:linear-gradient(180deg,#145a32,#1e8449);
+  box-shadow:0 0 28px rgba(39,174,96,.55), inset 0 1px 0 rgba(255,255,255,.12);
   display:flex;align-items:center;justify-content:center;
   animation:doniaPulse 2.2s ease-in-out infinite;
-  border:2px solid rgba(94,234,212,.45);
+  border:2px solid rgba(192,57,43,.6);
 }
 .donia-robot svg{width:64px;height:64px;opacity:.95}
 @keyframes doniaPulse{
-  0%,100%{transform:scale(1);box-shadow:0 0 28px rgba(45,212,191,.45)}
-  50%{transform:scale(1.04);box-shadow:0 0 44px rgba(45,212,191,.85)}
+  0%,100%{transform:scale(1);box-shadow:0 0 28px rgba(39,174,96,.45)}
+  50%{transform:scale(1.04);box-shadow:0 0 44px rgba(39,174,96,.85)}
 }
-.stat-card{background:linear-gradient(135deg,rgba(14,116,144,.22),rgba(15,118,110,.18));
-  border:1px solid rgba(94,234,212,.28);border-radius:16px;
-  padding:1.1rem;text-align:center;margin-bottom:.75rem}
-.stat-card h2{font-size:1.85rem;margin:0;color:#5eead4!important}
-.stat-card p{margin:0;color:rgba(226,232,240,.82);font-size:.86rem}
-.feature-card{background:rgba(15,23,42,.45);border:1px solid rgba(148,163,184,.2);
-  border-radius:16px;padding:1.25rem;margin:.55rem 0;
-  direction:rtl;text-align:right;color:rgba(248,250,252,.94)}
-.feature-card h4{color:#2dd4bf;margin:0 0 .45rem;font-size:1.02rem}
-.result-box{background:rgba(15,23,42,.4);border:1px solid rgba(148,163,184,.18);
-  border-radius:16px;padding:1.45rem;direction:rtl;text-align:right;
-  color:rgba(248,250,252,.94);line-height:2;margin:.85rem 0}
-.db-item{background:rgba(30,41,59,.5);border-right:4px solid #14b8a6;
-  border-radius:10px;padding:.85rem 1.05rem;margin:.45rem 0;
-  direction:rtl;text-align:right;color:rgba(248,250,252,.95)}
-.error-box{background:rgba(127,29,29,.25);border:1px solid rgba(248,113,113,.45);
-  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
-  color:#fecaca;margin:.65rem 0}
-.success-box{background:rgba(6,78,59,.28);border:1px solid rgba(52,211,153,.4);
-  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
-  color:#a7f3d0;margin:.65rem 0}
-.warn-box{background:rgba(120,53,15,.28);border:1px solid rgba(251,191,36,.4);
-  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
-  color:#fde68a;margin:.65rem 0}
-.template-box{background:rgba(14,116,144,.12);border:2px dashed rgba(45,212,191,.35);
-  border-radius:14px;padding:1.05rem;direction:rtl;text-align:right;
-  color:rgba(226,232,240,.9);margin:.65rem 0;font-size:.9rem;line-height:1.85}
+
+/* الأزرار — أخضر زمردي */
 div.stButton>button{
-  background:linear-gradient(135deg,#0d9488,#0f766e)!important;color:#ecfeff!important;
+  background:linear-gradient(135deg,#1e8449,#145a32)!important;color:#ffffff!important;
   border:none!important;border-radius:18px!important;
   padding:0.85rem 1.65rem!important;min-height:3.1rem!important;
   font-weight:800!important;font-size:1.02rem!important;width:100%!important;
   transition:transform .22s, box-shadow .22s!important;
-  box-shadow:0 6px 22px rgba(13,148,136,.45)!important;
+  box-shadow:0 6px 22px rgba(30,132,73,.45)!important;
 }
 div.stButton>button:hover{
   transform:translateY(-3px)!important;
-  box-shadow:0 12px 36px rgba(13,148,136,.65)!important;
+  box-shadow:0 12px 36px rgba(192,57,43,.5)!important;
+  background:linear-gradient(135deg,#c0392b,#922b21)!important;
 }
+
+/* بطاقات الإحصاء */
+.stat-card{background:linear-gradient(135deg,rgba(30,132,73,.1),rgba(39,174,96,.08));
+  border:2px solid #27ae60;border-radius:16px;
+  padding:1.1rem;text-align:center;margin-bottom:.75rem}
+.stat-card h2{font-size:1.85rem;margin:0;color:#145a32!important}
+.stat-card p{margin:0;color:#333;font-size:.86rem}
+
+/* البطاقات العامة */
+.feature-card{background:#f9f9f9;border:1px solid #27ae60;
+  border-right:5px solid #1e8449;
+  border-radius:16px;padding:1.25rem;margin:.55rem 0;
+  direction:rtl;text-align:right;color:#111}
+.feature-card h4{color:#1e8449;margin:0 0 .45rem;font-size:1.02rem}
+
+.result-box{background:#f9f9f9;border:1px solid rgba(30,132,73,.3);
+  border-radius:16px;padding:1.45rem;direction:rtl;text-align:right;
+  color:#111;line-height:2;margin:.85rem 0}
+
+.db-item{background:#f4f9f4;border-right:4px solid #1e8449;
+  border-radius:10px;padding:.85rem 1.05rem;margin:.45rem 0;
+  direction:rtl;text-align:right;color:#111}
+
+/* صناديق التنبيه */
+.error-box{background:rgba(192,57,43,.08);border:2px solid #c0392b;
+  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
+  color:#922b21;margin:.65rem 0;font-weight:600}
+.success-box{background:rgba(30,132,73,.08);border:2px solid #27ae60;
+  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
+  color:#145a32;margin:.65rem 0;font-weight:600}
+.warn-box{background:rgba(243,156,18,.1);border:2px solid #f39c12;
+  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
+  color:#784212;margin:.65rem 0}
+.template-box{background:rgba(30,132,73,.06);border:2px dashed #27ae60;
+  border-radius:14px;padding:1.05rem;direction:rtl;text-align:right;
+  color:#145a32;margin:.65rem 0;font-size:.9rem;line-height:1.85}
+
+/* التصنيفات */
+.grade-A{color:#1e8449;font-weight:700}
+.grade-B{color:#2e86c1;font-weight:700}
+.grade-C{color:#d4ac0d;font-weight:700}
+.grade-D{color:#c0392b;font-weight:700}
+
+/* الشريط الجانبي */
+section[data-testid="stSidebar"]{
+  direction:rtl;
+  background:linear-gradient(180deg,#f4fbf6,#eaf6ee)!important;
+  border-left:4px solid #27ae60;
+}
+section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
+
+/* التبويبات */
+.stTabs [data-baseweb="tab"]{direction:rtl;font-size:.9rem;font-weight:700;color:#145a32}
+.stTabs [data-baseweb="tab"][aria-selected="true"]{
+  border-bottom:3px solid #c0392b!important;color:#c0392b!important}
+
+/* تسميات الحقول */
 .stSelectbox label,.stTextInput label,.stTextArea label,
 .stNumberInput label,.stSlider label,.stFileUploader label,.stRadio label{
-  direction:rtl;text-align:right;color:rgba(226,232,240,.95)!important;font-weight:600}
-section[data-testid="stSidebar"]{direction:rtl;background:linear-gradient(180deg,#0f172a,#0c1e2e)!important}
-section[data-testid="stSidebar"] .stMarkdown{text-align:right}
-.stTabs [data-baseweb="tab"]{direction:rtl;font-size:.9rem;font-weight:700}
-.grade-A{color:#34d399;font-weight:700}
-.grade-B{color:#38bdf8;font-weight:700}
-.grade-C{color:#fbbf24;font-weight:700}
-.grade-D{color:#f87171;font-weight:700}
+  direction:rtl;text-align:right;color:#145a32!important;font-weight:700}
+
+/* أيقونة مفتاح API — كتاب مفتوح */
+.api-book-widget{
+  background:linear-gradient(135deg,#f4fbf6,#eaf6ee);
+  border:2px solid #27ae60;border-radius:16px;
+  padding:1.1rem 1.2rem;text-align:center;margin:.5rem 0;
+}
+.api-book-icon{font-size:2.4rem;display:block;margin-bottom:.35rem}
+.api-book-slogan{font-size:1rem;font-weight:800;color:#145a32;
+  display:block;letter-spacing:.03em}
+.api-book-status-active{
+  display:block;margin-top:.4rem;font-size:.88rem;font-weight:700;
+  color:#1e8449;background:#d5f5e3;border-radius:8px;padding:.2rem .7rem;
+}
+.api-book-status-inactive{
+  display:block;margin-top:.4rem;font-size:.88rem;font-weight:700;
+  color:#c0392b;background:#fdecea;border-radius:8px;padding:.2rem .7rem;
+}
+
+/* روابط التواصل */
 .donia-social{display:flex;flex-wrap:wrap;gap:.45rem;justify-content:center;margin:.35rem 0}
 .donia-social a{
-  display:inline-block;padding:.35rem .65rem;border-radius:12px;
-  background:rgba(14,116,144,.35);color:#ecfeff!important;font-weight:700;font-size:.82rem;
-  text-decoration:none!important;border:1px solid rgba(94,234,212,.35);
+  display:inline-block;padding:.35rem .75rem;border-radius:12px;
+  background:#145a32;color:#ffffff!important;font-weight:700;font-size:.82rem;
+  text-decoration:none!important;border:1px solid #27ae60;
   transition:transform .2s,box-shadow .2s;
 }
-.donia-social a:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(13,148,136,.45)}
-.donia-ip-footer{text-align:center;font-size:.82rem;color:rgba(226,232,240,.88);padding:1rem 0 0;margin-top:1.5rem;border-top:1px solid rgba(148,163,184,.2)}
+.donia-social a:hover{
+  transform:translateY(-2px);
+  box-shadow:0 6px 18px rgba(192,57,43,.4);
+  background:#c0392b!important;
+}
+
+/* التذييل الثابت */
+.donia-ip-footer{
+  text-align:center;font-size:.85rem;color:#145a32;font-weight:600;
+  padding:1.2rem 0 .5rem;margin-top:1.5rem;
+  border-top:3px solid #27ae60;
+  background:linear-gradient(90deg,#f4fbf6,#fef9f9,#f4fbf6);
+  border-radius:0 0 12px 12px;
+}
+.donia-footer-social{display:flex;flex-wrap:wrap;gap:.6rem;justify-content:center;margin:.5rem 0}
+.donia-footer-social a{
+  display:inline-flex;align-items:center;gap:.3rem;
+  padding:.4rem .9rem;border-radius:20px;
+  background:#145a32;color:#ffffff!important;font-weight:700;font-size:.82rem;
+  text-decoration:none!important;transition:background .2s,transform .2s;
+}
+.donia-footer-social a:hover{background:#c0392b!important;transform:translateY(-2px)}
+
+/* علم الجزائر المتحرك */
+.dz-flag-wrap{display:flex;justify-content:center;margin:.5rem 0}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1180,6 +1294,8 @@ with st.sidebar:
     if os.path.isfile(_logo_path):
         st.image(_logo_path, width=220, caption="DONIA LABS TECH")
     st.markdown("## ⚙️ الإعدادات العامة")
+
+    # ─── واجهة مفتاح API الآمنة — أيقونة "كتاب مفتوح" ───────────
     api_key = os.getenv("GROQ_API_KEY", "").strip()
     try:
         if not api_key and hasattr(st, "secrets") and getattr(st, "secrets", None):
@@ -1219,12 +1335,26 @@ with st.sidebar:
     school_year  = st.text_input("السنة الدراسية", value="2025/2026", key="syear")
 
     st.markdown("---")
+
+    # ─── أيقونة "الكتاب المفتوح" — أمان المفتاح ───────────────
     if api_key:
-        st.markdown('<div class="success-box">✅ مفتاح Groq API متاح</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="api-book-widget">'
+            '<span class="api-book-icon">📖</span>'
+            '<span class="api-book-slogan">العلم هو السلاح</span>'
+            '<span class="api-book-status-active">✅ حسابك نشط</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     else:
-        st.markdown('<div class="error-box">❌ GROQ_API_KEY غير موجود</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="api-book-widget">'
+            '<span class="api-book-icon">📖</span>'
+            '<span class="api-book-slogan">العلم هو السلاح</span>'
+            '<span class="api-book-status-inactive">⛔ المفتاح غير مُفعَّل</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
     with st.expander("☁️ إعدادات السحابة"):
         st.caption(
@@ -1254,28 +1384,59 @@ with st.sidebar:
 model_name = DEFAULT_GROQ_MODEL
 
 # ═══════════════════════════════════════════════════════════
-# HEADER
+# HEADER — الهوية الجزائرية الوطنية
 # ═══════════════════════════════════════════════════════════
+
+# علم الجزائر المتحرك (SVG متحرك بتأثير الرفرفة)
 st.markdown("""
+<div class="dz-flag-wrap">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" width="180" height="120"
+       style="border:3px solid #c0392b;border-radius:8px;box-shadow:0 4px 16px rgba(20,90,50,.35)">
+    <defs>
+      <clipPath id="flagClip"><rect width="120" height="80" rx="5"/></clipPath>
+      <animateTransform attributeName="transform" type="skewX"
+        values="0;2;0;-2;0" dur="2s" repeatCount="indefinite"/>
+    </defs>
+    <g clip-path="url(#flagClip)">
+      <rect width="60" height="80" fill="#006233"/>
+      <rect x="60" width="60" height="80" fill="#ffffff"/>
+      <g transform="translate(60,40)">
+        <circle r="13" fill="#d21034"/>
+        <circle r="10" fill="#ffffff"/>
+        <polygon points="0,-11 2.5,-3.5 10,-3.5 4,1 6,9 0,4.5 -6,9 -4,1 -10,-3.5 -2.5,-3.5"
+                 fill="#d21034"/>
+      </g>
+    </g>
+  </svg>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown(f"""
 <div class="title-card">
-    <h1>DONIA MIND — المعلم الذكي</h1>
+    <h1 style="color:#ffffff!important">🎓 DONIA MIND — المعلم الذكي</h1>
     <div class="donia-robot-wrap" aria-hidden="true">
       <div class="donia-robot" title="مساعدك التربوي">
         <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-          <rect x="12" y="14" width="40" height="36" rx="10" fill="#ccfbf1" stroke="#0d9488" stroke-width="2"/>
-          <circle cx="26" cy="30" r="5" fill="#0f766e"/>
-          <circle cx="38" cy="30" r="5" fill="#0f766e"/>
-          <circle cx="26.5" cy="29.5" r="1.5" fill="#ecfeff"/>
-          <circle cx="38.5" cy="29.5" r="1.5" fill="#ecfeff"/>
-          <path d="M24 42 Q32 48 40 42" stroke="#0f766e" stroke-width="2" fill="none" stroke-linecap="round"/>
-          <rect x="28" y="6" width="8" height="10" rx="2" fill="#5eead4"/>
-          <ellipse cx="32" cy="54" rx="14" ry="4" fill="rgba(45,212,191,.35)"/>
+          <rect x="12" y="14" width="40" height="36" rx="10" fill="#d5f5e3" stroke="#145a32" stroke-width="2"/>
+          <circle cx="26" cy="30" r="5" fill="#145a32"/>
+          <circle cx="38" cy="30" r="5" fill="#145a32"/>
+          <circle cx="26.5" cy="29.5" r="1.5" fill="#ffffff"/>
+          <circle cx="38.5" cy="29.5" r="1.5" fill="#ffffff"/>
+          <path d="M24 42 Q32 48 40 42" stroke="#c0392b" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+          <rect x="28" y="6" width="8" height="10" rx="2" fill="#c0392b"/>
+          <ellipse cx="32" cy="54" rx="14" ry="4" fill="rgba(39,174,96,.35)"/>
         </svg>
       </div>
     </div>
     <p>منصة تعليمية للمنظومة الجزائرية · مذكرات · اختبارات · تنقيط · تحليل · تصحيح</p>
 </div>
 """, unsafe_allow_html=True)
+
+# رسالة الترحيب
+st.markdown(
+    f'<div class="welcome-banner">🌟 {WELCOME_MESSAGE_AR}</div>',
+    unsafe_allow_html=True
+)
 
 # ═══════════════════════════════════════════════════════════
 # TABS
@@ -2200,8 +2361,31 @@ with tab_stats:
             st.markdown('<div class="error-box">❌ Firebase: غير متصل</div>',
                         unsafe_allow_html=True)
 
-# ─── تذييل الواجهة الرئيسية — حقوق الملكية الفكرية ───
+# ─── تذييل الواجهة الرئيسية — حقوق الملكية وروابط التواصل ───
 st.markdown(
-    f'<div class="donia-ip-footer">{COPYRIGHT_FOOTER_AR}</div>',
+    f"""
+<div class="donia-ip-footer">
+  <div style="margin-bottom:.5rem;font-size:1rem">
+    {COPYRIGHT_FOOTER_AR}
+  </div>
+  <div class="donia-footer-social">
+    <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer">
+      📱 واتساب
+    </a>
+    <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer">
+      📘 فيسبوك
+    </a>
+    <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer">
+      ✈️ تيليغرام
+    </a>
+    <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer">
+      💼 لينكدإن
+    </a>
+  </div>
+  <div style="margin-top:.4rem;font-size:.78rem;color:#888">
+    DONIA LABS TECH — منصة المعلم الجزائري الذكي
+  </div>
+</div>
+""",
     unsafe_allow_html=True,
 )
