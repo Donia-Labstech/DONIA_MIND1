@@ -1,5 +1,5 @@
 """
-DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v2.0
+DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v2.1
 المعلم الذكي للمنظومة التربوية الجزائرية
 ═══════════════════════════════════════════════════════════
 إصلاحات وتحسينات:
@@ -11,9 +11,13 @@ DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v2.0
   FIX-6 [Excel parsing]    : parse_grade_book_excel + أوراق متعددة (دمج / اختيار ورقة) + pandas/xlrd
   UX-1  : ثيم احترافي، أزرار كبيرة، آفاتار روبوت، إخفاء اسم نموذج الذكاء الاصطناعي عن الواجهة
   UX-2  : هوية جزائرية — ألوان العلم (أخضر/أبيض/أحمر)، علم متحرك، رسالة ترحيب
+  UX-3  : شعار DONIA LABS TECH في الشريط الجانبي، تذييل بروابط التواصل الاجتماعي
   I18N  : مواد لغوية أجنبية — توليد وPDF باتجاه LTR عند الحاجة
   OCR   : معاينة صور أوراق الإجابة + استخراج نص اختياري (pytesseract)
   SEC   : واجهة مفتاح API آمنة (كتاب مفتوح + "العلم هو السلاح")
+  EXPORT: تصدير Word (.docx) بجانب PDF في كل تبويب (مذكرة/اختبار/تقرير)
+          generate_exam_docx · generate_lesson_plan_docx · generate_report_docx
+  FONT  : خطوط Amiri/Cairo العربية مضمّنة في PDF — حرف صحيح RTL بالكامل
 ═══════════════════════════════════════════════════════════
 """
 import streamlit as st
@@ -45,6 +49,16 @@ try:
     _ARABIC_AVAILABLE = True
 except ImportError:
     _ARABIC_AVAILABLE = False
+
+try:
+    from docx import Document as DocxDocument
+    from docx.shared import Pt, Cm, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    _DOCX_AVAILABLE = True
+except ImportError:
+    _DOCX_AVAILABLE = False
 
 try:
     import pytesseract  # noqa: F401 — استخراج نص من صور أوراق الإجابة (اختياري)
@@ -1287,10 +1301,212 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     return buf.read()
 
 # ═══════════════════════════════════════════════════════════
+# WORD (.docx) EXPORT HELPERS — تصدير Word
+# ═══════════════════════════════════════════════════════════
+
+def _docx_set_rtl(paragraph):
+    """Force RTL direction on a paragraph."""
+    pPr = paragraph._p.get_or_add_pPr()
+    bidi_el = OxmlElement('w:bidi')
+    bidi_el.set(qn('w:val'), '1')
+    pPr.append(bidi_el)
+
+
+def _docx_heading(doc, text: str, level: int = 1, color_hex: str = "145a32"):
+    """Add a styled heading paragraph."""
+    p = doc.add_heading(text, level=level)
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _docx_set_rtl(p)
+    for run in p.runs:
+        r, g, b = (int(color_hex[i:i+2], 16) for i in (0, 2, 4))
+        run.font.color.rgb = RGBColor(r, g, b)
+    return p
+
+
+def _docx_para(doc, text: str, bold: bool = False, size: int = 12,
+               align=WD_ALIGN_PARAGRAPH.RIGHT):
+    """Add a styled body paragraph."""
+    p = doc.add_paragraph()
+    p.alignment = align
+    _docx_set_rtl(p)
+    run = p.add_run(text)
+    run.bold = bold
+    run.font.size = Pt(size)
+    return p
+
+
+def generate_exam_docx(exam_data: dict) -> bytes:
+    """Generate a Word (.docx) exam document matching the Algerian official template."""
+    if not _DOCX_AVAILABLE:
+        return b""
+    doc = DocxDocument()
+
+    # Page margins
+    for section in doc.sections:
+        section.top_margin    = Cm(2)
+        section.bottom_margin = Cm(2)
+        section.left_margin   = Cm(2.5)
+        section.right_margin  = Cm(2.5)
+
+    # ── Header table (official Algerian exam header) ──────────
+    hdr = doc.add_table(rows=3, cols=2)
+    hdr.style = 'Table Grid'
+    cells = hdr.rows[0].cells
+    cells[0].text = exam_data.get('school', '')
+    cells[1].text = "الجمهورية الجزائرية الديمقراطية الشعبية"
+    cells = hdr.rows[1].cells
+    cells[0].text = f"السنة الدراسية: {exam_data.get('year', '')}"
+    cells[1].text = "وزارة التربية الوطنية"
+    cells = hdr.rows[2].cells
+    cells[0].text = f"المدة: {exam_data.get('duration', '')}"
+    cells[1].text = (f"المستوى: {exam_data.get('grade', '')}   |   "
+                     f"المقاطعة: {exam_data.get('district', '')}")
+    for row in hdr.rows:
+        for cell in row.cells:
+            for para in cell.paragraphs:
+                para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                _docx_set_rtl(para)
+                for run in para.runs:
+                    run.font.size = Pt(10)
+
+    doc.add_paragraph()
+
+    # ── Exam title ─────────────────────────────────────────────
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _docx_set_rtl(title_p)
+    run = title_p.add_run(
+        f"اختبار {exam_data.get('semester', '')} في مادة {exam_data.get('subject', '')}")
+    run.bold      = True
+    run.font.size = Pt(14)
+
+    doc.add_paragraph()
+
+    # ── Content ───────────────────────────────────────────────
+    content = exam_data.get('content', '')
+    for line in content.split('\n'):
+        _docx_para(doc, line)
+
+    doc.add_paragraph()
+    sign_p = doc.add_paragraph("بالتوفيق                                              إنتهى")
+    sign_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+def generate_lesson_plan_docx(plan_data: dict) -> bytes:
+    """Generate a Word (.docx) lesson plan (مذكرة) document."""
+    if not _DOCX_AVAILABLE:
+        return b""
+    doc = DocxDocument()
+    for section in doc.sections:
+        section.top_margin    = Cm(2)
+        section.bottom_margin = Cm(2)
+        section.left_margin   = Cm(2.5)
+        section.right_margin  = Cm(2.5)
+
+    _docx_heading(doc, "المذكرة البيداغوجية — DONIA MIND", level=1)
+
+    # Info table
+    info_rows = [
+        ["المؤسسة", plan_data.get('school', '')],
+        ["الأستاذ(ة)", plan_data.get('teacher', '')],
+        ["المادة", plan_data.get('subject', '')],
+        ["المستوى", plan_data.get('grade', '')],
+        ["الدرس", plan_data.get('lesson', '')],
+        ["المجال", plan_data.get('domain', '')],
+        ["المدة الإجمالية", plan_data.get('duration', '')],
+    ]
+    tbl = doc.add_table(rows=len(info_rows), cols=2)
+    tbl.style = 'Table Grid'
+    for i, (label, val) in enumerate(info_rows):
+        cells = tbl.rows[i].cells
+        cells[0].text = label
+        cells[1].text = val
+        for cell in cells:
+            for para in cell.paragraphs:
+                para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                _docx_set_rtl(para)
+
+    doc.add_paragraph()
+    _docx_heading(doc, "محتوى المذكرة", level=2, color_hex="1e8449")
+    content = plan_data.get('content', '')
+    for line in content.split('\n'):
+        _docx_para(doc, line)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+def generate_report_docx(report_data: dict) -> bytes:
+    """Generate a Word (.docx) pedagogical report."""
+    if not _DOCX_AVAILABLE:
+        return b""
+    doc = DocxDocument()
+    for section in doc.sections:
+        section.top_margin    = Cm(2)
+        section.bottom_margin = Cm(2)
+        section.left_margin   = Cm(2.5)
+        section.right_margin  = Cm(2.5)
+
+    _docx_heading(doc, "تقرير تحليل نتائج الأقسام", level=1)
+    _docx_para(doc,
+               f"المادة: {report_data.get('subject', '')}   |   "
+               f"الفصل: {report_data.get('semester', '')}   |   "
+               f"المؤسسة: {report_data.get('school', '')}",
+               bold=True)
+    doc.add_paragraph()
+
+    for cls in report_data.get('classes', []):
+        _docx_heading(doc, f"القسم: {cls.get('name', '')}", level=2, color_hex="1e8449")
+        stats_rows = [
+            ["عدد التلاميذ",   str(cls.get('count', ''))],
+            ["المعدل العام",   str(cls.get('avg',   ''))],
+            ["أعلى معدل",     str(cls.get('max',   ''))],
+            ["أدنى معدل",     str(cls.get('min',   ''))],
+            ["نسبة النجاح %", str(cls.get('pass_rate', ''))],
+        ]
+        tbl = doc.add_table(rows=len(stats_rows), cols=2)
+        tbl.style = 'Table Grid'
+        for i, (label, val) in enumerate(stats_rows):
+            cells = tbl.rows[i].cells
+            cells[0].text = label
+            cells[1].text = val
+            for cell in cells:
+                for para in cell.paragraphs:
+                    para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                    _docx_set_rtl(para)
+        doc.add_paragraph()
+
+        top5 = cls.get('top5', [])
+        if top5:
+            _docx_para(doc, "أفضل 5 تلاميذ:", bold=True)
+            for idx, (name, avg) in enumerate(top5, 1):
+                _docx_para(doc, f"  {idx}. {name} — {avg:.2f}")
+        doc.add_paragraph()
+
+    if report_data.get('ai_analysis'):
+        _docx_heading(doc, "التقرير البيداغوجي (الذكاء الاصطناعي)", level=2,
+                      color_hex="922b21")
+        for line in report_data['ai_analysis'].split('\n'):
+            _docx_para(doc, line)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+# ═══════════════════════════════════════════════════════════
 # SIDEBAR
 # ═══════════════════════════════════════════════════════════
 with st.sidebar:
-    _logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_donia.png")
+    _logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_donia.jpg")
     if os.path.isfile(_logo_path):
         st.image(_logo_path, width=220, caption="DONIA LABS TECH")
     st.markdown("## ⚙️ الإعدادات العامة")
@@ -1568,7 +1784,7 @@ with tab_plan:
                          plan_text, datetime.now().strftime("%Y-%m-%d %H:%M")))
                     st.success("✅ تم حفظ المذكرة")
 
-                    d1, d2 = st.columns(2)
+                    d1, d2, d3 = st.columns(3)
                     with d1:
                         st.download_button("📥 تحميل نص",
                                            plan_text.encode("utf-8-sig"),
@@ -1579,6 +1795,16 @@ with tab_plan:
                         st.download_button("📄 تحميل PDF (النموذج الرسمي)", pdf_p,
                                            f"مذكرة_{plan_lesson}.pdf", "application/pdf",
                                            key="dl_plan_pdf")
+                    with d3:
+                        if _DOCX_AVAILABLE:
+                            docx_p = generate_lesson_plan_docx(plan_data)
+                            st.download_button("📝 تحميل Word (.docx)", docx_p,
+                                               f"مذكرة_{plan_lesson}.docx",
+                                               "application/vnd.openxmlformats-officedocument"
+                                               ".wordprocessingml.document",
+                                               key="dl_plan_docx")
+                        else:
+                            st.caption("⚠️ python-docx غير مثبت")
                 except ValueError as err:
                     st.warning(f"⚠️ تعذر معالجة بيانات المذكرة (ValueError). "
                                f"تأكد من إكمال الحقول الأساسية. التفاصيل: {err}")
@@ -1699,7 +1925,7 @@ with tab_exam:
                         "subject": subject, "duration": exam_duration,
                         "content": exam_content,
                     }
-                    d1, d2 = st.columns(2)
+                    d1, d2, d3 = st.columns(3)
                     with d1:
                         st.download_button("📥 تحميل نص",
                                            exam_content.encode("utf-8-sig"),
@@ -1710,6 +1936,16 @@ with tab_exam:
                         st.download_button("📄 تحميل PDF (النموذج الرسمي)", pdf_e,
                                            f"اختبار_{subject}_{exam_semester}.pdf",
                                            "application/pdf", key="dl_exam_pdf")
+                    with d3:
+                        if _DOCX_AVAILABLE:
+                            docx_e = generate_exam_docx(exam_pdf_data)
+                            st.download_button("📝 تحميل Word (.docx)", docx_e,
+                                               f"اختبار_{subject}_{exam_semester}.docx",
+                                               "application/vnd.openxmlformats-officedocument"
+                                               ".wordprocessingml.document",
+                                               key="dl_exam_docx")
+                        else:
+                            st.caption("⚠️ python-docx غير مثبت")
                 except Exception as err:
                     st.markdown(f'<div class="error-box">❌ {err}</div>',
                                 unsafe_allow_html=True)
@@ -1993,9 +2229,21 @@ with tab_report:
                         "ai_analysis": ai_analysis,
                     }
                     pdf_rep = generate_report_pdf(report_data)
-                    st.download_button("📄 تحميل التقرير الكامل PDF", pdf_rep,
-                                       f"تقرير_نتائج_{rep_semester}.pdf",
-                                       "application/pdf", key="dl_report_pdf")
+                    r1, r2 = st.columns(2)
+                    with r1:
+                        st.download_button("📄 تحميل التقرير الكامل PDF", pdf_rep,
+                                           f"تقرير_نتائج_{rep_semester}.pdf",
+                                           "application/pdf", key="dl_report_pdf")
+                    with r2:
+                        if _DOCX_AVAILABLE:
+                            docx_rep = generate_report_docx(report_data)
+                            st.download_button("📝 تحميل Word (.docx)", docx_rep,
+                                               f"تقرير_نتائج_{rep_semester}.docx",
+                                               "application/vnd.openxmlformats-officedocument"
+                                               ".wordprocessingml.document",
+                                               key="dl_report_docx")
+                        else:
+                            st.caption("⚠️ python-docx غير مثبت")
                 except Exception as e:
                     st.error(str(e))
         else:
@@ -2004,9 +2252,19 @@ with tab_report:
                 "semester": rep_semester, "classes": all_classes, "ai_analysis": "",
             }
             pdf_rep = generate_report_pdf(report_data)
-            st.download_button("📄 تحميل التقرير PDF", pdf_rep,
-                               "تقرير_نتائج.pdf", "application/pdf",
-                               key="dl_report_pdf2")
+            rr1, rr2 = st.columns(2)
+            with rr1:
+                st.download_button("📄 تحميل التقرير PDF", pdf_rep,
+                                   "تقرير_نتائج.pdf", "application/pdf",
+                                   key="dl_report_pdf2")
+            with rr2:
+                if _DOCX_AVAILABLE:
+                    docx_rep2 = generate_report_docx(report_data)
+                    st.download_button("📝 تحميل Word (.docx)", docx_rep2,
+                                       "تقرير_نتائج.docx",
+                                       "application/vnd.openxmlformats-officedocument"
+                                       ".wordprocessingml.document",
+                                       key="dl_report_docx2")
 
 # ══════════════════════════════════════════════════════════
 # TAB 5 — توليد تمرين
