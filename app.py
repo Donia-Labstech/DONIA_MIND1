@@ -1,5 +1,5 @@
 """
-DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v2.1
+DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v2.2
 المعلم الذكي للمنظومة التربوية الجزائرية
 ═══════════════════════════════════════════════════════════
 إصلاحات وتحسينات:
@@ -18,6 +18,11 @@ DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v2.1
   EXPORT: تصدير Word (.docx) بجانب PDF في كل تبويب (مذكرة/اختبار/تقرير)
           generate_exam_docx · generate_lesson_plan_docx · generate_report_docx
   FONT  : خطوط Amiri/Cairo العربية مضمّنة في PDF — حرف صحيح RTL بالكامل
+  UX-4  : إزالة علم SVG واستبداله بشريط شعار ثنائي اللغة (بالعلم نرتقي / Education Uplifts Us)
+           بخطوط Cairo (عربي) + Montserrat (إنجليزي) عبر Google Fonts
+  UX-5  : روبوت ذكاء اصطناعي متحرك (SVG مدمج) — عيون وابتسامة وهوائي متحركة
+  UX-6  : أزرار احترافية (border-radius 14px، hover أخضر→أحمر مع رفع)
+           حقول إدخال بحدود خضراء وتأثير focus أحمر
 ═══════════════════════════════════════════════════════════
 """
 import streamlit as st
@@ -260,7 +265,7 @@ st.markdown("""
    DONIA MIND v2.0 — الهوية البصرية الجزائرية الوطنية
    الألوان: أخضر زمردي / أبيض ناصع / أحمر عليزاران
    ═══════════════════════════════════════════════════════════ */
-@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;800&family=Montserrat:wght@400;600;700;800;900&display=swap');
 
 /* إخفاء شعار Streamlit وزر GitHub تماماً */
 #MainMenu{visibility:hidden!important}
@@ -448,8 +453,77 @@ section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
 }
 .donia-footer-social a:hover{background:#c0392b!important;transform:translateY(-2px)}
 
-/* علم الجزائر المتحرك */
-.dz-flag-wrap{display:flex;justify-content:center;margin:.5rem 0}
+/* علم الجزائر — مخفي في v2.1 (تم استبداله بألوان الواجهة) */
+.dz-flag-wrap{display:none!important}
+
+/* شعار الحكمة الثنائي اللغة */
+.donia-slogan-bar{
+  display:flex;flex-direction:column;align-items:center;
+  gap:.3rem;padding:.9rem 1.5rem;margin:.6rem 0;
+  background:linear-gradient(90deg,#145a32 0%,#1e8449 45%,#c0392b 100%);
+  border-radius:14px;
+  box-shadow:0 4px 20px rgba(20,90,50,.3);
+}
+.donia-slogan-ar{
+  font-family:'Cairo','Amiri',sans-serif;
+  font-size:1.35rem;font-weight:800;
+  color:#ffffff;letter-spacing:.04em;
+  text-shadow:0 2px 6px rgba(0,0,0,.3);
+}
+.donia-slogan-en{
+  font-family:'Montserrat',sans-serif;
+  font-size:.9rem;font-weight:600;
+  color:rgba(255,255,255,.88);letter-spacing:.18em;
+  text-transform:uppercase;
+}
+.donia-slogan-divider{
+  width:40px;height:2px;
+  background:rgba(255,255,255,.55);border-radius:2px;
+}
+
+/* أزرار محسّنة — تأثيرات Hover احترافية */
+.stButton>button{
+  border-radius:14px!important;
+  font-family:'Cairo',sans-serif!important;
+  font-weight:700!important;
+  font-size:.95rem!important;
+  padding:.55rem 1.4rem!important;
+  border:2px solid #27ae60!important;
+  background:linear-gradient(135deg,#145a32,#1e8449)!important;
+  color:#ffffff!important;
+  transition:all .22s cubic-bezier(.4,0,.2,1)!important;
+  box-shadow:0 4px 14px rgba(20,90,50,.22)!important;
+  letter-spacing:.02em!important;
+}
+.stButton>button:hover{
+  transform:translateY(-3px) scale(1.025)!important;
+  background:linear-gradient(135deg,#c0392b,#e74c3c)!important;
+  border-color:#c0392b!important;
+  box-shadow:0 8px 28px rgba(192,57,43,.45)!important;
+}
+.stButton>button:active{transform:translateY(0) scale(.98)!important}
+
+/* بطاقات الميزات — border-radius محسّن */
+.feature-card{border-radius:16px!important}
+.success-box{border-radius:12px!important}
+.error-box{border-radius:12px!important}
+.result-box{border-radius:16px!important}
+.template-box{border-radius:12px!important}
+
+/* حقول الإدخال */
+.stTextInput>div>div>input,
+.stTextArea>div>div>textarea,
+.stSelectbox>div>div{
+  border-radius:12px!important;
+  border:2px solid #27ae60!important;
+  font-family:'Cairo',sans-serif!important;
+  transition:border-color .2s,box-shadow .2s!important;
+}
+.stTextInput>div>div>input:focus,
+.stTextArea>div>div>textarea:focus{
+  border-color:#c0392b!important;
+  box-shadow:0 0 0 3px rgba(192,57,43,.18)!important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1603,48 +1677,63 @@ model_name = DEFAULT_GROQ_MODEL
 # HEADER — الهوية الجزائرية الوطنية
 # ═══════════════════════════════════════════════════════════
 
-# علم الجزائر المتحرك (SVG متحرك بتأثير الرفرفة)
+# ─── شعار الحكمة الثنائي — بخط Cairo/Montserrat ───────────────
 st.markdown("""
-<div class="dz-flag-wrap">
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" width="180" height="120"
-       style="border:3px solid #c0392b;border-radius:8px;box-shadow:0 4px 16px rgba(20,90,50,.35)">
-    <defs>
-      <clipPath id="flagClip"><rect width="120" height="80" rx="5"/></clipPath>
-      <animateTransform attributeName="transform" type="skewX"
-        values="0;2;0;-2;0" dur="2s" repeatCount="indefinite"/>
-    </defs>
-    <g clip-path="url(#flagClip)">
-      <rect width="60" height="80" fill="#006233"/>
-      <rect x="60" width="60" height="80" fill="#ffffff"/>
-      <g transform="translate(60,40)">
-        <circle r="13" fill="#d21034"/>
-        <circle r="10" fill="#ffffff"/>
-        <polygon points="0,-11 2.5,-3.5 10,-3.5 4,1 6,9 0,4.5 -6,9 -4,1 -10,-3.5 -2.5,-3.5"
-                 fill="#d21034"/>
-      </g>
-    </g>
-  </svg>
+<div class="donia-slogan-bar">
+  <span class="donia-slogan-ar">بالعلم نرتقي</span>
+  <div class="donia-slogan-divider"></div>
+  <span class="donia-slogan-en">Education Uplifts Us</span>
 </div>
 """, unsafe_allow_html=True)
 
+# ─── بطاقة العنوان مع روبوت الذكاء الاصطناعي ──────────────────
 st.markdown(f"""
 <div class="title-card">
-    <h1 style="color:#ffffff!important">🎓 DONIA MIND — المعلم الذكي</h1>
+    <h1 style="color:#ffffff!important;font-family:'Cairo',sans-serif">🎓 DONIA MIND — المعلم الذكي</h1>
     <div class="donia-robot-wrap" aria-hidden="true">
-      <div class="donia-robot" title="مساعدك التربوي">
-        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-          <rect x="12" y="14" width="40" height="36" rx="10" fill="#d5f5e3" stroke="#145a32" stroke-width="2"/>
-          <circle cx="26" cy="30" r="5" fill="#145a32"/>
-          <circle cx="38" cy="30" r="5" fill="#145a32"/>
-          <circle cx="26.5" cy="29.5" r="1.5" fill="#ffffff"/>
-          <circle cx="38.5" cy="29.5" r="1.5" fill="#ffffff"/>
-          <path d="M24 42 Q32 48 40 42" stroke="#c0392b" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-          <rect x="28" y="6" width="8" height="10" rx="2" fill="#c0392b"/>
-          <ellipse cx="32" cy="54" rx="14" ry="4" fill="rgba(39,174,96,.35)"/>
+      <div class="donia-robot" title="مساعدك التربوي الذكي">
+        <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+          <!-- هيكل الروبوت الرئيسي -->
+          <rect x="15" y="18" width="50" height="44" rx="14"
+                fill="#d5f5e3" stroke="#145a32" stroke-width="2.5"/>
+          <!-- هوائي -->
+          <line x1="40" y1="18" x2="40" y2="8" stroke="#c0392b" stroke-width="3"
+                stroke-linecap="round"/>
+          <circle cx="40" cy="6" r="4" fill="#c0392b">
+            <animate attributeName="r" values="4;5.5;4" dur="1.6s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="1;.55;1" dur="1.6s" repeatCount="indefinite"/>
+          </circle>
+          <!-- عيون متحركة -->
+          <circle cx="31" cy="36" r="6" fill="#145a32"/>
+          <circle cx="49" cy="36" r="6" fill="#145a32"/>
+          <circle cx="32.5" cy="35" r="2.2" fill="#ffffff">
+            <animateTransform attributeName="transform" type="translate"
+              values="0,0;1,0;0,0;-1,0;0,0" dur="3s" repeatCount="indefinite"/>
+          </circle>
+          <circle cx="50.5" cy="35" r="2.2" fill="#ffffff">
+            <animateTransform attributeName="transform" type="translate"
+              values="0,0;1,0;0,0;-1,0;0,0" dur="3s" repeatCount="indefinite"/>
+          </circle>
+          <!-- ابتسامة -->
+          <path d="M30 52 Q40 60 50 52" stroke="#c0392b" stroke-width="3"
+                fill="none" stroke-linecap="round">
+            <animate attributeName="d"
+              values="M30 52 Q40 60 50 52;M30 50 Q40 58 50 50;M30 52 Q40 60 50 52"
+              dur="2.5s" repeatCount="indefinite"/>
+          </path>
+          <!-- خطوط دماغية -->
+          <line x1="23" y1="28" x2="23" y2="46" stroke="rgba(20,90,50,.25)"
+                stroke-width="1.2" stroke-dasharray="3 2"/>
+          <line x1="57" y1="28" x2="57" y2="46" stroke="rgba(20,90,50,.25)"
+                stroke-width="1.2" stroke-dasharray="3 2"/>
+          <!-- ظل -->
+          <ellipse cx="40" cy="68" rx="18" ry="4.5" fill="rgba(39,174,96,.25)"/>
         </svg>
       </div>
     </div>
-    <p>منصة تعليمية للمنظومة الجزائرية · مذكرات · اختبارات · تنقيط · تحليل · تصحيح</p>
+    <p style="font-family:'Cairo',sans-serif;font-weight:600">
+      منصة تعليمية للمنظومة الجزائرية · مذكرات · اختبارات · تنقيط · تحليل · تصحيح
+    </p>
 </div>
 """, unsafe_allow_html=True)
 
