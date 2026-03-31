@@ -1,1 +1,10 @@
-
+مشروعك/
+├── app.py
+├── requirements.txt
+├── .env                      ← (اختياري) مفاتيح Groq, Firebase, Drive
+├── .streamlit/
+│   └── config.toml           ← إعدادات Streamlit (المنفذ، الثيم...)
+└── assets/
+    ├── logo_donia.jpg        ← شعار DONIA LABS TECH ✅ موجود
+    ├── Amiri-Regular.ttf     ← (اختياري) للـ PDF بدون إنترنت
+    └── Cairo-Regular.ttf     ← (اختياري) للـ PDF بدون إنترنت
