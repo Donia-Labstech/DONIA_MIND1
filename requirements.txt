@@ -1,47 +1,38 @@
-# ═══════════════════════════════════════════════════════════
-# DONIA MIND 1 — v3.0 Global Excellence Upgrade
-# requirements.txt
-# Install: pip install -r requirements.txt
-# ═══════════════════════════════════════════════════════════
-
-# ── Core Framework ──────────────────────────────────────────
-streamlit>=1.35.0
+# الأساسيات وواجهة المستخدم
+streamlit>=1.32.0
 python-dotenv>=1.0.0
-
-# ── LLM Engines ─────────────────────────────────────────────
-langchain-groq>=0.1.6
-langchain>=0.2.0
-groq>=0.9.0
-
-# ── NEW v3.0: Arcee AI (OpenAI-compatible REST) ─────────────
 requests>=2.31.0
-openai>=1.30.0          # optional: for OpenAI-SDK style Arcee calls
 
-# ── Arabic Rendering (PDF RTL fix) ──────────────────────────
-arabic-reshaper>=3.0.0
-python-bidi>=0.4.2
+# الذكاء الاصطناعي و Groq و OpenAI
+groq>=0.4.0
+openai>=1.0.0
+langchain-groq>=0.1.3
 
-# ── PDF Generation ──────────────────────────────────────────
-reportlab>=4.2.0
+# قواعد البيانات والربط السحابي (Firebase & Google)
+firebase-admin>=6.2.0
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.1.0
+google-auth-oauthlib>=1.0.0
 
-# ── Word Export (RTL) ───────────────────────────────────────
-python-docx>=1.1.0
-lxml>=5.0.0
-
-# ── Excel Export (Multi-sheet grade books) ──────────────────
-openpyxl>=3.1.2
-xlrd>=2.0.1             # legacy .xls read support
+# معالجة البيانات والجداول والرسوم البيانية
 pandas>=2.0.0
-
-# ── QR Code Generation ──────────────────────────────────────
-qrcode[pil]>=7.4.2
-Pillow>=10.0.0
-
-# ── Data Visualization ──────────────────────────────────────
+openpyxl>=3.1.2
+xlsxwriter>=3.1.0
+xlrd>=2.0.0
 plotly>=5.18.0
 
-# ── OCR (optional — requires Tesseract system binary) ───────
+# معالجة الصور و الـ OCR ورموز الاستجابة السريعة
+Pillow>=10.0.0
 pytesseract>=0.3.10
+qrcode[pil]>=7.4.2
 
-# ── Utilities ───────────────────────────────────────────────
-numpy>=1.26.0
+# معالجة وتوليد الملفات (PDF & Word & LXML)
+reportlab>=4.0.0
+python-docx>=1.1.0
+lxml>=4.9.0
+pdfplumber>=0.10.0
+PyPDF2>=3.0.0
+
+# دعم اللغة العربية والخطوط
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
