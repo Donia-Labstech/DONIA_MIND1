@@ -36,3 +36,13 @@ PyPDF2>=3.0.0
 # دعم اللغة العربية والخطوط
 arabic-reshaper>=3.0.0
 python-bidi>=0.4.2
+from fpdf import FPDF
+
+pdf = FPDF()
+# يجب تحميل خط يدعم العربية (مثل Arial أو DejaVu)
+pdf.add_font('Amiri', '', 'Amiri-Regular.ttf', uni=True) 
+pdf.set_font('Amiri', size=14)
+
+# إجبار النص على الاتجاه من اليمين لليسار
+pdf.write(10, "النص العربي سيظهر هنا بشكل صحيح")
+
