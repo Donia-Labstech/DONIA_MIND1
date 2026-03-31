@@ -26,9 +26,10 @@ pytesseract>=0.3.10
 # معالجة وتوليد الملفات (PDF & Word)
 reportlab>=4.0.0
 python-docx>=1.1.0
+lxml>=4.9.0
 pdfplumber>=0.10.0
 PyPDF2>=3.0.0
 
-# دعم اللغة العربية والخطوط
+# دعم اللغة العربية والخطوط (مطلوب لـ PDF العربي الصحيح)
 arabic-reshaper>=3.0.0
 python-bidi>=0.4.2
