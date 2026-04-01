@@ -3014,3 +3014,121 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  PATCH — أضف هذا الكود في آخر app.py تماماً                    ║
+# ║  يُصلح مشكلة المربعات في PDF بشكل نهائي                        ║
+# ║  لا يحذف أي شيء — فقط يُعيد تعريف دالة التسجيل بشكل أقوى      ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+import sys as _sys
+
+def _register_arabic_pdf_fonts():
+    """
+    نسخة محسّنة من دالة تسجيل الخطوط — تبحث في كل مكان محتمل.
+    تُستبدل بها النسخة القديمة الموجودة في الكود.
+    """
+    global _AR_FONT_MAIN, _AR_FONT_BOLD, _AR_FONTS_TRIED
+    if _AR_FONTS_TRIED:
+        return
+    _AR_FONTS_TRIED = True
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # ══════════════════════════════════════════════════════
+    # كل المسارات المحتملة على Streamlit Cloud وGitHub
+    # ══════════════════════════════════════════════════════
+    search_roots = [
+        base_dir,                                    # جذر المشروع ← هنا غالباً الملف
+        os.path.join(base_dir, "fonts"),             # مجلد fonts/
+        os.path.join(base_dir, "assets"),            # مجلد assets/
+        os.path.join(base_dir, "assets", "fonts"),   # assets/fonts/
+        "/app",                                      # مسار Streamlit Cloud
+        "/app/app",
+        "/home/appuser",
+        os.getcwd(),                                 # المجلد الحالي
+        os.path.join(os.getcwd(), "fonts"),
+    ] + [p for p in _sys.path if p]                 # كل مسارات Python
+
+    def _find(fname):
+        for root in search_roots:
+            p = os.path.join(root, fname)
+            if os.path.isfile(p) and os.path.getsize(p) > 8_000:
+                return p
+        return None
+
+    # ══════════════════════════════════════════════════════
+    # تحميل تلقائي إذا لم يُعثر على الخط في أي مكان
+    # ══════════════════════════════════════════════════════
+    def _download_font(fname, url, dest_dir):
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, fname)
+        if os.path.isfile(dest) and os.path.getsize(dest) > 8_000:
+            return dest
+        try:
+            urllib.request.urlretrieve(url, dest)
+            if os.path.isfile(dest) and os.path.getsize(dest) > 8_000:
+                return dest
+        except Exception:
+            pass
+        return None
+
+    # قائمة الخطوط المطلوبة: (اسم_التسجيل، اسم_الملف، رابط_التحميل)
+    FONT_LIST = [
+        (
+            "Amiri",
+            "Amiri-Regular.ttf",
+            "https://raw.githubusercontent.com/googlefonts/amiri/main/fonts/ttf/Amiri-Regular.ttf",
+        ),
+        (
+            "Amiri-Bold",
+            "Amiri-Bold.ttf",
+            "https://raw.githubusercontent.com/googlefonts/amiri/main/fonts/ttf/Amiri-Bold.ttf",
+        ),
+        (
+            "Cairo",
+            "Cairo-Regular.ttf",
+            "https://raw.githubusercontent.com/googlefonts/cairo/main/fonts/ttf/Cairo-Regular.ttf",
+        ),
+        (
+            "Cairo-Bold",
+            "Cairo-Bold.ttf",
+            "https://raw.githubusercontent.com/googlefonts/cairo/main/fonts/ttf/Cairo-Bold.ttf",
+        ),
+    ]
+
+    registered = []
+
+    for label, fname, url in FONT_LIST:
+        # 1) ابحث أولاً
+        font_path = _find(fname)
+
+        # 2) حمّل إذا لم يوجد
+        if not font_path:
+            font_path = _download_font(fname, url, os.path.join(base_dir, "fonts"))
+
+        # 3) سجّل مع ReportLab
+        if font_path:
+            try:
+                pdfmetrics.registerFont(TTFont(label, font_path))
+                registered.append(label)
+            except Exception:
+                pass
+
+    # ══════════════════════════════════════════════════════
+    # اختر أفضل خط متاح
+    # ══════════════════════════════════════════════════════
+    if "Cairo" in registered:
+        _AR_FONT_MAIN = "Cairo"
+        _AR_FONT_BOLD = "Cairo-Bold" if "Cairo-Bold" in registered else "Cairo"
+    elif "Amiri" in registered:
+        _AR_FONT_MAIN = "Amiri"
+        _AR_FONT_BOLD = "Amiri-Bold" if "Amiri-Bold" in registered else "Amiri"
+    # إذا فشل كل شيء → يبقى Helvetica (الافتراضي القديم)
+
+
+# ══════════════════════════════════════════════════════════
+# إعادة تعيين الحالة وإعادة التسجيل فوراً عند بدء التطبيق
+# ══════════════════════════════════════════════════════════
+_AR_FONTS_TRIED = False          # أعد ضبط العلَم لإجبار إعادة التسجيل
+_STYLES_CACHE.clear()            # أعد ضبط كاش الأنماط
+_register_arabic_pdf_fonts()     # سجّل الآن فوراً
