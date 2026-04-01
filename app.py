@@ -24,29 +24,17 @@ DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v2.2
   UX-6  : أزرار احترافية (border-radius 14px، hover أخضر→أحمر مع رفع)
            حقول إدخال بحدود خضراء وتأثير focus أحمر
 ═══════════════════════════════════════════════════════════
-
-try:
-    from arabic_reshaper import reshape
-    from bidi.algorithm import get_display
-    _ARABIC_AVAILABLE = True
-except ImportError:
-    _ARABIC_AVAILABLE = False
-
-try:
-    from docx import Document as DocxDocument
-    from docx.shared import Pt, Cm, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml.ns import qn
-    from docx.oxml import OxmlElement
-    _DOCX_AVAILABLE = True
-except ImportError:
-    _DOCX_AVAILABLE = False
 """
- 
+╔══════════════════════════════════════════════════════════╗
+║   حل نهائي لمشكلة المربعات في PDF العربي                ║
+║   ضع هذا الملف في جذر مشروعك بجانب app.py              ║
+╚══════════════════════════════════════════════════════════╝
+"""
+
 import os
 import sys
 from pathlib import Path
- 
+
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.pagesizes import A4
@@ -54,15 +42,15 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_RIGHT, TA_CENTER
 from reportlab.lib.units import cm
- 
+
 import arabic_reshaper
 from bidi.algorithm import get_display
- 
- 
+
+
 # ════════════════════════════════════════════════════════════
 #  الخطوة 1: إيجاد ملف الخط بشكل مضمون
 # ════════════════════════════════════════════════════════════
- 
+
 def _find_font_path(font_filename: str) -> str | None:
     """
     يبحث عن ملف الخط في كل مكان محتمل على سيرفر Streamlit Cloud
@@ -86,18 +74,18 @@ def _find_font_path(font_filename: str) -> str | None:
         *[Path(p) / font_filename for p in sys.path],
         *[Path(p) / "fonts" / font_filename for p in sys.path],
     ]
- 
+
     for path in search_paths:
         if path.exists():
             return str(path)
- 
+
     return None
- 
- 
+
+
 # ════════════════════════════════════════════════════════════
 #  الخطوة 2: تحميل الخط من الإنترنت إذا لم يوجد (خط احتياطي)
 # ════════════════════════════════════════════════════════════
- 
+
 def _download_font_if_missing(font_filename: str) -> str:
     """
     يحمّل خط Amiri من Google Fonts إذا لم يوجد الملف محلياً
@@ -105,14 +93,14 @@ def _download_font_if_missing(font_filename: str) -> str:
     """
     import urllib.request
     import tempfile
- 
+
     FONT_URLS = {
         "Amiri-Regular.ttf": (
             "https://github.com/aliftype/amiri/releases/download/1.000/"
             "Amiri-1.000.zip"
         ),
     }
- 
+
     # حاول تحميل مباشر من GitHub
     direct_urls = {
         "Amiri-Regular.ttf": (
@@ -124,44 +112,44 @@ def _download_font_if_missing(font_filename: str) -> str:
             "hinted/ttf/NotoSansArabic/NotoSansArabic-Regular.ttf"
         ),
     }
- 
+
     url = direct_urls.get(font_filename)
     if not url:
         raise FileNotFoundError(f"لا يوجد رابط تحميل لـ {font_filename}")
- 
+
     # احفظ في مجلد temp
     save_path = Path(tempfile.gettempdir()) / font_filename
     if not save_path.exists():
         print(f"⬇️  جاري تحميل الخط: {font_filename}")
         urllib.request.urlretrieve(url, save_path)
         print(f"✅ تم تحميل الخط في: {save_path}")
- 
+
     return str(save_path)
- 
- 
+
+
 # ════════════════════════════════════════════════════════════
 #  الخطوة 3: تسجيل الخط مرة واحدة فقط
 # ════════════════════════════════════════════════════════════
- 
+
 _REGISTERED_FONTS: dict[str, str] = {}  # cache
- 
- 
+
+
 def register_arabic_font(
     font_name: str = "Amiri",
     font_filename: str = "Amiri-Regular.ttf",
 ) -> str:
     """
     يسجّل الخط العربي مع ReportLab ويعيد اسمه للاستخدام.
- 
+
     الاستخدام:
         font = register_arabic_font()
         # ثم استخدم font في ParagraphStyle
     """
     if font_name in _REGISTERED_FONTS:
         return font_name  # سبق تسجيله
- 
+
     font_path = _find_font_path(font_filename)
- 
+
     if font_path is None:
         print(f"⚠️  لم يُعثر على {font_filename} محلياً — جارٍ التحميل...")
         try:
@@ -173,22 +161,22 @@ def register_arabic_font(
             font_filename = "NotoSansArabic-Regular.ttf"
             font_name = "NotoArabic"
             font_path = _download_font_if_missing(font_filename)
- 
+
     pdfmetrics.registerFont(TTFont(font_name, font_path))
     _REGISTERED_FONTS[font_name] = font_path
     print(f"✅ تم تسجيل الخط '{font_name}' من: {font_path}")
     return font_name
- 
- 
+
+
 # ════════════════════════════════════════════════════════════
 #  الخطوة 4: دالة معالجة النص العربي
 # ════════════════════════════════════════════════════════════
- 
+
 def arabic(text: str) -> str:
     """
     حوّل أي نص عربي قبل إضافته لـ ReportLab.
     يعالج: تشكيل الحروف + اتجاه RTL
- 
+
     الاستخدام:
         Paragraph(arabic("مرحبا بالعالم"), style)
     """
@@ -196,12 +184,12 @@ def arabic(text: str) -> str:
         return text
     reshaped = arabic_reshaper.reshape(text)
     return get_display(reshaped)
- 
- 
+
+
 # ════════════════════════════════════════════════════════════
 #  الخطوة 5: إنشاء style عربي جاهز للاستخدام
 # ════════════════════════════════════════════════════════════
- 
+
 def get_arabic_style(
     font_size: int = 12,
     alignment: str = "right",   # right | center | left
@@ -209,18 +197,18 @@ def get_arabic_style(
 ) -> ParagraphStyle:
     """
     يعيد ParagraphStyle عربي جاهز.
- 
+
     الاستخدام:
         style = get_arabic_style(font_size=14)
         Paragraph(arabic("النص"), style)
     """
     font_name = register_arabic_font()
- 
+
     align_map = {
         "right": TA_RIGHT,
         "center": TA_CENTER,
     }
- 
+
     return ParagraphStyle(
         name=f"Arabic_{font_size}",
         fontName=font_name,
@@ -231,12 +219,12 @@ def get_arabic_style(
         leftIndent=0,
         wordWrap="RTL",
     )
- 
- 
+
+
 # ════════════════════════════════════════════════════════════
 #  الخطوة 6: دالة إنشاء PDF متكاملة
 # ════════════════════════════════════════════════════════════
- 
+
 def create_arabic_pdf(
     output_path: str,
     title: str,
@@ -244,7 +232,7 @@ def create_arabic_pdf(
 ) -> str:
     """
     أنشئ PDF عربياً بدون مربعات.
- 
+
     content_blocks: قائمة من dict بهذا الشكل:
         [
             {"type": "title",    "text": "عنوان الصفحة"},
@@ -252,7 +240,7 @@ def create_arabic_pdf(
             {"type": "body",     "text": "نص عادي..."},
             {"type": "spacer"},
         ]
- 
+
     مثال:
         create_arabic_pdf(
             output_path="report.pdf",
@@ -266,7 +254,7 @@ def create_arabic_pdf(
         return: مسار الملف
     """
     font_name = register_arabic_font()
- 
+
     doc = SimpleDocTemplate(
         output_path,
         pagesize=A4,
@@ -275,7 +263,7 @@ def create_arabic_pdf(
         topMargin=2 * cm,
         bottomMargin=2 * cm,
     )
- 
+
     # الأنماط
     styles = {
         "title": ParagraphStyle(
@@ -304,22 +292,57 @@ def create_arabic_pdf(
             wordWrap="RTL",
         ),
     }
- 
+
     story = []
     for block in content_blocks:
         btype = block.get("type", "body")
         text  = block.get("text", "")
- 
+
         if btype == "spacer":
             story.append(Spacer(1, 0.5 * cm))
         elif btype in styles:
             story.append(Paragraph(arabic(text), styles[btype]))
         else:
             story.append(Paragraph(arabic(text), styles["body"]))
- 
+
     doc.build(story)
     return output_path
- 
+
+
+# ════════════════════════════════════════════════════════════
+#  اختبار سريع — شغّله محلياً للتأكد
+# ════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    out = create_arabic_pdf(
+        output_path="test_arabic.pdf",
+        title="اختبار",
+        content_blocks=[
+            {"type": "title",   "text": "مرحباً بالعالم"},
+            {"type": "heading", "text": "هذا عنوان فرعي"},
+            {"type": "body",    "text": "هذا نص عربي كامل بدون مربعات إن شاء الله"},
+            {"type": "spacer"},
+            {"type": "body",    "text": "السطر الثاني من النص"},
+        ],
+    )
+    print(f"✅ تم إنشاء: {out}")
+try:
+    from arabic_reshaper import reshape
+    from bidi.algorithm import get_display
+    _ARABIC_AVAILABLE = True
+except ImportError:
+    _ARABIC_AVAILABLE = False
+
+try:
+    from docx import Document as DocxDocument
+    from docx.shared import Pt, Cm, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    _DOCX_AVAILABLE = True
+except ImportError:
+    _DOCX_AVAILABLE = False
+
 try:
     import pytesseract  # noqa: F401 — استخراج نص من صور أوراق الإجابة (اختياري)
     _TESSERACT_AVAILABLE = True
