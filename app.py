@@ -25,35 +25,31 @@ DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v2.2
            حقول إدخال بحدود خضراء وتأثير focus أحمر
 ═══════════════════════════════════════════════════════════
 """
-import streamlit as st
-import os, sqlite3, re, json, io, base64
-import urllib.request
-from datetime import datetime
-from dotenv import load_dotenv
-from langchain_groq import ChatGroq
-import plotly.express as px
-import plotly.graph_objects as go
-import pandas as pd
-from PIL import Image
-import openpyxl
-from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
-from openpyxl.utils import get_column_letter
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
-                                 HRFlowable, Table, TableStyle, KeepTogether)
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
-from reportlab.lib import colors as rl_colors
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-try:
-    from arabic_reshaper import reshape
-    from bidi.algorithm import get_display
-    _ARABIC_AVAILABLE = True
-except ImportError:
-    _ARABIC_AVAILABLE = False
+# إعداد دعم اللغة العربية وتسجيل الخط فوراً لمنع ظهور المربعات
+FONT_PATH = "Amiri-Regular.ttf"  # تأكد من وجود الملف في المجلد الرئيسي
+FONT_NAME = "ArabicFont"
+
+def _setup_arabic_support():
+    """تسجيل الخط العربي ومعالجة المكتبات المطلوبة"""
+    arabic_ok = False
+    try:
+        from arabic_reshaper import reshape
+        from bidi.algorithm import get_display
+        globals()['reshape'] = reshape
+        globals()['get_display'] = get_display
+        arabic_ok = True
+        # تسجيل الخط في ReportLab إذا وجد الملف
+        if os.path.exists(FONT_PATH):
+            pdfmetrics.registerFont(TTFont(FONT_NAME, FONT_PATH))
+    except ImportError:
+        pass
+    return arabic_ok
+
+_ARABIC_AVAILABLE = _setup_arabic_support()
 
 try:
     from docx import Document as DocxDocument
@@ -66,7 +62,7 @@ except ImportError:
     _DOCX_AVAILABLE = False
 
 try:
-    import pytesseract  # noqa: F401 — استخراج نص من صور أوراق الإجابة (اختياري)
+    import pytesseract  # استخراج نص من صور أوراق الإجابة
     _TESSERACT_AVAILABLE = True
 except ImportError:
     _TESSERACT_AVAILABLE = False
