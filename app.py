@@ -25,6 +25,10 @@ DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v2.2
            حقول إدخال بحدود خضراء وتأثير focus أحمر
 ═══════════════════════════════════════════════════════════
 """
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+pdfmetrics.registerFont(TTFont('Amiri', 'Amiri-Regular.ttf'))
 import streamlit as st
 import os, sqlite3, re, json, io, base64
 import urllib.request
