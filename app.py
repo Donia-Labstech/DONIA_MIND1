@@ -47,7 +47,22 @@ from reportlab.lib import colors as rl_colors
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+# --- إضافة لدعم اللغة العربية في ReportLab ---
+from reportlab.pdfbase.ttfonts import TTFont
+from arabic_reshaper import reshape
+from bidi.algorithm import get_display
 
+# 1. تسجيل الخط (تأكد أن الملف موجود في GitHub بنفس الاسم)
+try:
+    pdfmetrics.registerFont(TTFont('Amiri-Regular', 'Amiri-Regular.ttf'))
+    ARABIC_FONT = 'Amiri-Regular'
+except:
+    ARABIC_FONT = 'Helvetica' # خط احتياطي
+
+# 2. دالة سحرية لمعالجة النصوص العربية قبل إرسالها للـ Paragraph
+def fix_ar(text):
+    if not text: return ""
+    return get_display(reshape(str(text)))
 try:
     from arabic_reshaper import reshape
     from bidi.algorithm import get_display
