@@ -1,0 +1,2 @@
+fonts-hosny-amiri
+fonts-noto-core
