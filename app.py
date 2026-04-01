@@ -25,31 +25,35 @@ DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v2.2
            حقول إدخال بحدود خضراء وتأثير focus أحمر
 ═══════════════════════════════════════════════════════════
 """
+import streamlit as st
+import os, sqlite3, re, json, io, base64
+import urllib.request
+from datetime import datetime
+from dotenv import load_dotenv
+from langchain_groq import ChatGroq
+import plotly.express as px
+import plotly.graph_objects as go
+import pandas as pd
+from PIL import Image
+import openpyxl
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.utils import get_column_letter
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+                                 HRFlowable, Table, TableStyle, KeepTogether)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
+from reportlab.lib import colors as rl_colors
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# إعداد دعم اللغة العربية وتسجيل الخط فوراً لمنع ظهور المربعات
-FONT_PATH = "Amiri-Regular.ttf"  # تأكد من وجود الملف في المجلد الرئيسي
-FONT_NAME = "ArabicFont"
-
-def _setup_arabic_support():
-    """تسجيل الخط العربي ومعالجة المكتبات المطلوبة"""
-    arabic_ok = False
-    try:
-        from arabic_reshaper import reshape
-        from bidi.algorithm import get_display
-        globals()['reshape'] = reshape
-        globals()['get_display'] = get_display
-        arabic_ok = True
-        # تسجيل الخط في ReportLab إذا وجد الملف
-        if os.path.exists(FONT_PATH):
-            pdfmetrics.registerFont(TTFont(FONT_NAME, FONT_PATH))
-    except ImportError:
-        pass
-    return arabic_ok
-
-_ARABIC_AVAILABLE = _setup_arabic_support()
+try:
+    from arabic_reshaper import reshape
+    from bidi.algorithm import get_display
+    _ARABIC_AVAILABLE = True
+except ImportError:
+    _ARABIC_AVAILABLE = False
 
 try:
     from docx import Document as DocxDocument
@@ -62,7 +66,7 @@ except ImportError:
     _DOCX_AVAILABLE = False
 
 try:
-    import pytesseract  # استخراج نص من صور أوراق الإجابة
+    import pytesseract  # noqa: F401 — استخراج نص من صور أوراق الإجابة (اختياري)
     _TESSERACT_AVAILABLE = True
 except ImportError:
     _TESSERACT_AVAILABLE = False
@@ -2732,48 +2736,3 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
-# ════════════════════════════════════════════════════════════════════════
-# الحل النهائي والجذري لمشكلة المربعات في Streamlit Cloud
-# ════════════════════════════════════════════════════════════════════════
-import os
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfgen import canvas
-from arabic_reshaper import reshape
-from bidi.algorithm import get_display
-
-def fix_arabic_text(text):
-    """دالة إجبارية لمعالجة النص العربي قبل الطباعة"""
-    if not text: return ""
-    reshaped = reshape(str(text)) # ربط الحروف
-    bidi_text = get_display(reshaped) # ضبط الاتجاه من اليمين لليسار
-    return bidi_text
-
-def initialize_pdf_with_arabic(c, font_size=12):
-    """دالة إجبار البرنامج على استدعاء الخط العربي وتفعيله"""
-    # تأكد أن هذا الاسم هو نفس اسم الملف الذي رفعته على GitHub تماماً
-    font_filename = "Amiri-Regular.ttf" 
-    font_name = "ArabicFont"
-
-    if os.path.exists(font_filename):
-        try:
-            # تسجيل الخط في نظام ReportLab السحابي
-            pdfmetrics.registerFont(TTFont(font_name, font_filename))
-            # إجبار الـ Canvas على استخدام هذا الخط تحديداً
-            c.setFont(font_name, font_size)
-            return True
-        except Exception as e:
-            print(f"Error registering font: {e}")
-            return False
-    else:
-        print(f"Font file {font_filename} not found!")
-        return False
-
-# 💡 مثال لكيفية استخدامه داخل كود التحميل (Download Button) لديك:
-# ---------------------------------------------------------
-# c = canvas.Canvas("myfile.pdf")
-# if initialize_pdf_with_arabic(c, font_size=14):
-#     # الآن اطبع النص باستخدام الدالة المعالجة
-#     text_to_print = fix_arabic_text("نص عربي بدون مربعات")
-#     c.drawString(100, 700, text_to_print)
-# c.save()
