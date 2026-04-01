@@ -33,7 +33,8 @@ from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 import plotly.express as px
 import plotly.graph_objects as go
-import pandas as pdffrom reportlab.pdfbase import pdfmetrics
+import pandas as pdffrom reportlab.pdfbase 
+import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from arabic_reshaper import reshape
 from bidi.algorithm import get_display
