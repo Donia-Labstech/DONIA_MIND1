@@ -2737,51 +2737,47 @@ st.markdown(
     unsafe_allow_html=True,
 )
 # ════════════════════════════════════════════════════════════════════════
-# جزء دعم اللغة العربية وحل مشكلة المربعات (إضافة مستقلة)
+# الحل النهائي والجذري لمشكلة المربعات في Streamlit Cloud
 # ════════════════════════════════════════════════════════════════════════
 import os
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
 from arabic_reshaper import reshape
 from bidi.algorithm import get_display
 
-def initialize_arabic_support():
-    """
-    تقوم هذه الدالة بالبحث عن خط عربي في مشروعك وتسجيله في ReportLab.
-    تأكد من وجود ملف خط باسم 'arial.ttf' أو 'Amiri-Regular.ttf' في مجلد المشروع.
-    """
-    # قائمة بأسماء الخطوط الشائعة التي قد تكون رفعتها
-    possible_fonts = ['Amiri-Regular.ttf', 'arial.ttf', 'DejaVuSans.ttf']
-    font_path = None
-    
-    for f in possible_fonts:
-        if os.path.exists(f):
-            font_path = f
-            break
-            
-    if font_path:
+def fix_arabic_text(text):
+    """دالة إجبارية لمعالجة النص العربي قبل الطباعة"""
+    if not text: return ""
+    reshaped = reshape(str(text)) # ربط الحروف
+    bidi_text = get_display(reshaped) # ضبط الاتجاه من اليمين لليسار
+    return bidi_text
+
+def initialize_pdf_with_arabic(c, font_size=12):
+    """دالة إجبار البرنامج على استدعاء الخط العربي وتفعيله"""
+    # تأكد أن هذا الاسم هو نفس اسم الملف الذي رفعته على GitHub تماماً
+    font_filename = "Amiri-Regular.ttf" 
+    font_name = "ArabicFont"
+
+    if os.path.exists(font_filename):
         try:
-            pdfmetrics.registerFont(TTFont('ArabicStyle', font_path))
-            print(f"✅ تم تفعيل الخط العربي بنجاح من الملف: {font_path}")
+            # تسجيل الخط في نظام ReportLab السحابي
+            pdfmetrics.registerFont(TTFont(font_name, font_filename))
+            # إجبار الـ Canvas على استخدام هذا الخط تحديداً
+            c.setFont(font_name, font_size)
+            return True
         except Exception as e:
-            print(f"⚠️ خطأ أثناء تسجيل الخط: {e}")
+            print(f"Error registering font: {e}")
+            return False
     else:
-        print("❌ تنبيه: لم يتم العثور على ملف خط .ttf في مجلد المشروع. يرجى رفع ملف خط لضمان اختفاء المربعات.")
+        print(f"Font file {font_filename} not found!")
+        return False
 
-def fix_arabic(text):
-    """
-    استخدم هذه الدالة لتغليف النصوص العربية قبل وضعها في الـ PDF.
-    مثال: canvas.drawString(10, 10, fix_arabic("مرحباً بك"))
-    """
-    if not text or not any(ord(char) > 127 for char in text): # إذا كان النص إنجليزي أو فارغ
-        return text
-    try:
-        reshaped = reshape(text) # معالجة الحروف المتصلة
-        bidi_text = get_display(reshaped) # ضبط الاتجاه RTL
-        return bidi_text
-    except:
-        return text
-
-# تشغيل الإعداد التلقائي عند تشغيل البرنامج
-initialize_arabic_support()
-# ════════════════════════════════════════════════════════════════════════
+# 💡 مثال لكيفية استخدامه داخل كود التحميل (Download Button) لديك:
+# ---------------------------------------------------------
+# c = canvas.Canvas("myfile.pdf")
+# if initialize_pdf_with_arabic(c, font_size=14):
+#     # الآن اطبع النص باستخدام الدالة المعالجة
+#     text_to_print = fix_arabic_text("نص عربي بدون مربعات")
+#     c.drawString(100, 700, text_to_print)
+# c.save()
