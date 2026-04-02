@@ -1,3 +1,0 @@
-GROQ_API_KEY = "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"
-ARCEE_API_KEY = "rcai-363717f36127cbbccd454ce10708e052"
-APP_URL = "https://doniamind1-pvnmwp3kdthtlfct7uhopm.streamlit.app/"
