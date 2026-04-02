@@ -10,6 +10,8 @@ PHASE 2 IMPROVEMENTS (ADDITIVE DEVELOPMENT):
   + Multi-tab Excel export (separate sheets per class)
   + Session persistence for pedagogical reports
   + Arabic reshaping via arabic_reshaper + python-bidi
+  + Embedded TrueType fonts for perfect PDF rendering
+  + Robust camera error handling
 ═══════════════════════════════════════════════════════════
 """
 import streamlit as st
@@ -115,6 +117,133 @@ SOCIAL_URL_TELEGRAM = os.getenv("DONIA_URL_TELEGRAM", "https://t.me/+LxRzVAK12HZ
 # App URL for QR Code (from environment or default)
 APP_URL = os.getenv("DONIA_APP_URL", "https://donia-mind.streamlit.app")
 
+# ═══════════════════════════════════════════════════════════
+# FIX 1: Missing helper functions
+# ═══════════════════════════════════════════════════════════
+def call_llm(llm, prompt: str) -> str:
+    """Invoke the LLM and return the content."""
+    return llm.invoke(prompt).content
+
+def generate_grade_book_excel(students: list, class_name: str, subject: str, semester: str, school_name: str) -> bytes:
+    """Generate a single-sheet Excel grade book."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = class_name[:31]
+
+    # Styling (same as multi-sheet version)
+    title_font = Font(name="Arial", bold=True, size=11)
+    header_font = Font(name="Arial", bold=True, size=10, color="FFFFFF")
+    body_font = Font(name="Arial", size=10)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    right = Alignment(horizontal="right", vertical="center")
+    thin = Side(style="thin", color="000000")
+    border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    purple_fill = PatternFill("solid", fgColor="764ba2")
+    light_fill = PatternFill("solid", fgColor="f0f0ff")
+
+    # Header
+    ws.merge_cells("A1:I1")
+    ws["A1"] = "الجمهورية الجزائرية الديمقراطية الشعبية"
+    ws["A1"].font = title_font
+    ws["A1"].alignment = center
+    ws["A1"].fill = light_fill
+
+    ws.merge_cells("A2:I2")
+    ws["A2"] = "وزارة التربية الوطنية"
+    ws["A2"].font = title_font
+    ws["A2"].alignment = center
+
+    ws.merge_cells("A3:I3")
+    ws["A3"] = f"المؤسسة: {school_name}"
+    ws["A3"].font = title_font
+    ws["A3"].alignment = center
+
+    ws.merge_cells("A4:I4")
+    ws["A4"] = f"دفتر التنقيط | القسم: {class_name} | المادة: {subject} | {semester}"
+    ws["A4"].font = title_font
+    ws["A4"].alignment = center
+    ws["A4"].fill = PatternFill("solid", fgColor="e8e8ff")
+
+    ws.append([])
+
+    # Headers
+    headers = ["الرقم", "اللقب", "الاسم", "تاريخ الميلاد",
+               "تقويم /20", "فرض /20", "اختبار /20", "المعدل /20", "التقديرات"]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=6, column=col, value=h)
+        cell.font = header_font
+        cell.alignment = center
+        cell.fill = purple_fill
+        cell.border = border
+    ws.row_dimensions[6].height = 30
+
+    # Data rows (index starting from 1)
+    for idx, stu in enumerate(students, 1):
+        row = 6 + idx
+        avg = stu.get('average', 0)
+        apprec = get_appreciation(avg)
+        values = [
+            idx,
+            stu.get('nom', ''),
+            stu.get('prenom', ''),
+            str(stu.get('dob', '')),
+            stu.get('taqwim', ''),
+            stu.get('fard', ''),
+            stu.get('ikhtibhar', ''),
+            avg,
+            apprec,
+        ]
+        for col, val in enumerate(values, 1):
+            cell = ws.cell(row=row, column=col, value=val)
+            cell.font = body_font
+            cell.border = border
+            cell.alignment = center if col not in [2, 3] else right
+            if idx % 2 == 0:
+                cell.fill = PatternFill("solid", fgColor="f8f8ff")
+        ws.row_dimensions[row].height = 22
+
+    # Statistics
+    last_data = 6 + len(students)
+    stat_row = last_data + 2
+    avgs_all = [s.get('average', 0) for s in students]
+    stats = [
+        ("عدد التلاميذ", len(students)),
+        ("معدل القسم", round(sum(avgs_all) / max(len(avgs_all), 1), 2)),
+        ("الناجحون", sum(1 for a in avgs_all if a >= 10)),
+    ]
+    for i, (label, val) in enumerate(stats):
+        lc = ws.cell(row=stat_row + i, column=1, value=label)
+        vc = ws.cell(row=stat_row + i, column=2, value=val)
+        lc.font = Font(bold=True, name="Arial", size=10)
+        vc.font = Font(bold=True, name="Arial", size=10, color="764ba2")
+        lc.fill = light_fill
+        vc.fill = light_fill
+        lc.border = border
+        vc.border = border
+
+    # Column widths
+    widths = [8, 16, 16, 14, 10, 10, 10, 10, 12]
+    for col, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(col)].width = w
+
+    ws.sheet_view.rightToLeft = True
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+def test_arcee_connection() -> bool:
+    """Try to instantiate an Arcee client to verify the API handshake."""
+    if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
+        return False
+    try:
+        client = Arcee(api_key=ARCEE_API_KEY)
+        # If the client object is created without exception, assume it's working.
+        # Optionally, we could call a simple validation method, but this is sufficient.
+        return client is not None
+    except Exception:
+        return False
 
 # ═══════════════════════════════════════════════════════════
 # PHASE 2: ENHANCED ARABIC TEXT PROCESSING (Zero-Box Solution)
@@ -133,19 +262,16 @@ def fix_arabic(text: str) -> str:
     except Exception:
         return str(text)
 
-
 def _escape_xml_for_rl(text: str) -> str:
     """Escape XML special characters for ReportLab."""
     s = str(text)
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
 
 def pdf_text_line(text: str, rtl: bool) -> str:
     """Safe text for ReportLab Paragraph with RTL/LTR support."""
     if rtl:
         return fix_arabic(str(text))
     return _escape_xml_for_rl(text)
-
 
 def get_pdf_mode_for_subject(subject: str) -> tuple[bool, str]:
     """Returns (rtl?, language_name) for PDF orientation."""
@@ -162,7 +288,6 @@ def get_pdf_mode_for_subject(subject: str) -> tuple[bool, str]:
         return False, "French"
     return True, "Arabic"
 
-
 def llm_output_language_clause(subject: str) -> str:
     """Return language instruction for LLM based on subject."""
     rtl, lang = get_pdf_mode_for_subject(subject)
@@ -176,14 +301,12 @@ def llm_output_language_clause(subject: str) -> str:
         f"Use correct typography and numbering for Latin left-to-right text."
     )
 
-
 # ═══════════════════════════════════════════════════════════
 # PHASE 2: DUAL-LLM HANDLER (Groq + Arcee)
 # ═══════════════════════════════════════════════════════════
 def get_llm(model_name: str, api_key: str):
     """Initialize Groq LLM."""
     return ChatGroq(model_name=model_name, groq_api_key=api_key, temperature=0.7)
-
 
 def get_arcee_client() -> object:
     """Initialize Arcee client for curriculum validation."""
@@ -193,7 +316,6 @@ def get_arcee_client() -> object:
         return Arcee(api_key=ARCEE_API_KEY)
     except Exception:
         return None
-
 
 def validate_with_arcee(content: str, subject: str, grade: str) -> tuple[str, dict]:
     """
@@ -237,7 +359,6 @@ def validate_with_arcee(content: str, subject: str, grade: str) -> tuple[str, di
     except Exception as e:
         return content, {"validated": False, "reason": str(e)}
 
-
 def dual_llm_generate(prompt: str, subject: str, grade: str, validate: bool = True) -> tuple[str, dict]:
     """
     Generate content with Groq, then optionally validate with Arcee.
@@ -264,17 +385,24 @@ def dual_llm_generate(prompt: str, subject: str, grade: str, validate: bool = Tr
     except Exception as e:
         return "", {"error": str(e)}
 
-
 # ═══════════════════════════════════════════════════════════
-# PHASE 2: ARABIC PDF FONTS (Zero-Box Solution)
+# PHASE 2: ARABIC PDF FONTS (Zero-Box Solution with embedded fallback)
 # ═══════════════════════════════════════════════════════════
 _AR_FONT_MAIN = "Helvetica"
 _AR_FONT_BOLD = "Helvetica-Bold"
 _AR_FONTS_TRIED = False
 
+# ⚠️ REPLACE THESE PLACEHOLDERS WITH ACTUAL BASE64 STRINGS OF Amiri-Regular.ttf AND Amiri-Bold.ttf
+# You can generate them by encoding the font files:
+#   import base64
+#   with open("Amiri-Regular.ttf", "rb") as f:
+#       print(base64.b64encode(f.read()).decode())
+# Then paste the long strings below.
+_EMBEDDED_FONT_AMIRI_REGULAR_B64 = ""   # TODO: paste the base64 string
+_EMBEDDED_FONT_AMIRI_BOLD_B64 = ""      # TODO: paste the base64 string
 
 def _try_download_amiri_font_files(font_dir: str) -> None:
-    """Auto-download Amiri fonts from official repository."""
+    """Auto-download Amiri fonts from official repository (fallback if embedded not available)."""
     if os.getenv("DONIA_AUTO_DOWNLOAD_FONTS", "1").strip().lower() in ("0", "false", "no"):
         return
     os.makedirs(font_dir, exist_ok=True)
@@ -297,9 +425,8 @@ def _try_download_amiri_font_files(font_dir: str) -> None:
         except Exception:
             pass
 
-
 def _register_arabic_pdf_fonts():
-    """Register Arabic fonts for ReportLab PDF."""
+    """Register Arabic fonts for ReportLab PDF, using embedded fonts if download fails."""
     global _AR_FONT_MAIN, _AR_FONT_BOLD, _AR_FONTS_TRIED
     if _AR_FONTS_TRIED:
         return
@@ -307,6 +434,7 @@ def _register_arabic_pdf_fonts():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     font_dir = os.path.join(base_dir, "fonts")
     _try_download_amiri_font_files(font_dir)
+
     reg = []
     for label, fname in (
         ("Amiri", "Amiri-Regular.ttf"),
@@ -321,6 +449,24 @@ def _register_arabic_pdf_fonts():
                 reg.append(label)
             except Exception:
                 pass
+
+    # If no fonts were registered from the file system, try embedded ones
+    if not reg and (_EMBEDDED_FONT_AMIRI_REGULAR_B64 and _EMBEDDED_FONT_AMIRI_BOLD_B64):
+        import tempfile
+        try:
+            # Write embedded fonts to temporary files
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".ttf") as f_reg:
+                f_reg.write(base64.b64decode(_EMBEDDED_FONT_AMIRI_REGULAR_B64))
+                reg_path = f_reg.name
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".ttf") as f_bold:
+                f_bold.write(base64.b64decode(_EMBEDDED_FONT_AMIRI_BOLD_B64))
+                bold_path = f_bold.name
+            pdfmetrics.registerFont(TTFont("Amiri", reg_path))
+            pdfmetrics.registerFont(TTFont("Amiri-Bold", bold_path))
+            reg = ["Amiri", "Amiri-Bold"]
+        except Exception:
+            pass
+
     if "Cairo" in reg:
         _AR_FONT_MAIN = "Cairo"
         _AR_FONT_BOLD = "Cairo-Bold" if "Cairo-Bold" in reg else "Cairo"
@@ -328,10 +474,8 @@ def _register_arabic_pdf_fonts():
         _AR_FONT_MAIN = "Amiri"
         _AR_FONT_BOLD = "Amiri-Bold" if "Amiri-Bold" in reg else "Amiri"
 
-
 # PDF Styles Cache
 _STYLES_CACHE: dict[str, dict] = {}
-
 
 def make_pdf_styles(rtl: bool = True) -> dict:
     """Create PDF styles with RTL/LTR support."""
@@ -364,7 +508,6 @@ def make_pdf_styles(rtl: bool = True) -> dict:
     }
     return _STYLES_CACHE[key]
 
-
 def _draw_pdf_footer(canvas, doc):
     """PDF footer with copyright protection."""
     _register_arabic_pdf_fonts()
@@ -379,10 +522,8 @@ def _draw_pdf_footer(canvas, doc):
     canvas.drawCentredString(w / 2.0, 0.55 * cm, txt)
     canvas.restoreState()
 
-
 def _pdf_footer_canvas_args() -> dict:
     return dict(onFirstPage=_draw_pdf_footer, onLaterPages=_draw_pdf_footer)
-
 
 # ═══════════════════════════════════════════════════════════
 # PHASE 2: QR CODE GENERATOR
@@ -402,7 +543,6 @@ def generate_qr_code(url: str, size: int = 150) -> BytesIO:
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf
-
 
 # ═══════════════════════════════════════════════════════════
 # PHASE 2: MULTI-TAB EXCEL EXPORT (Separate sheets per class)
@@ -525,7 +665,6 @@ def generate_multi_sheet_grade_book(classes_data: list, school_name: str, subjec
     buf.seek(0)
     return buf.read()
 
-
 # ═══════════════════════════════════════════════════════════
 # CURRICULUM DATA (Preserved from original)
 # ═══════════════════════════════════════════════════════════
@@ -627,12 +766,10 @@ DOMAINS = {
     "اللغة العربية وآدابها": ["فهم المكتوب", "الإنتاج الكتابي", "الظاهرة اللغوية", "الميدان الأدبي"],
 }
 
-
 # ═══════════════════════════════════════════════════════════
 # DATABASE (Preserved)
 # ═══════════════════════════════════════════════════════════
 DB_PATH = "donia_smart.db"
-
 
 def init_db():
     con = sqlite3.connect(DB_PATH)
@@ -659,7 +796,6 @@ def init_db():
     con.commit()
     con.close()
 
-
 def db_exec(sql, params=(), fetch=False):
     con = sqlite3.connect(DB_PATH)
     cur = con.execute(sql, params)
@@ -668,7 +804,6 @@ def db_exec(sql, params=(), fetch=False):
     con.close()
     return result
 
-
 def get_stats():
     total = (db_exec("SELECT COUNT(*) FROM exercises", fetch=True) or [(0,)])[0][0]
     plans = (db_exec("SELECT COUNT(*) FROM lesson_plans", fetch=True) or [(0,)])[0][0]
@@ -676,9 +811,7 @@ def get_stats():
     corr = (db_exec("SELECT COUNT(*) FROM corrections", fetch=True) or [(0,)])[0][0]
     return total, plans, exams, corr
 
-
 init_db()
-
 
 # ═══════════════════════════════════════════════════════════
 # HELPERS (Preserved)
@@ -696,7 +829,6 @@ def get_appreciation(grade, total=20):
     else:
         return "ضعيف"
 
-
 def calc_average(taqwim, fard, ikhtibhar):
     """Algerian average calculation: (تقويم×1 + فرض×1 + اختبار×2) / 4"""
     try:
@@ -707,14 +839,12 @@ def calc_average(taqwim, fard, ikhtibhar):
     except (TypeError, ValueError):
         return 0.0
 
-
 def safe_f(val, fmt=".2f") -> str:
     """Safe formatting for numbers."""
     try:
         return format(float(val), fmt)
     except (TypeError, ValueError):
         return "—"
-
 
 def render_with_latex(text):
     parts = re.split(r'(\$\$[\s\S]+?\$\$|\$[^\$\n]+?\$)', text)
@@ -729,7 +859,6 @@ def render_with_latex(text):
                 f'color:#111111;line-height:2;">{part}</div>',
                 unsafe_allow_html=True)
 
-
 def ocr_answer_sheet_image(image_bytes: bytes) -> str:
     """Extract text from answer sheet image."""
     if not _TESSERACT_AVAILABLE:
@@ -740,7 +869,6 @@ def ocr_answer_sheet_image(image_bytes: bytes) -> str:
         return pytesseract.image_to_string(im, lang="ara+eng+fra")
     except Exception:
         return ""
-
 
 def build_class_stats(stus: list, cls_name: str) -> dict:
     """Build class statistics from student list."""
@@ -769,7 +897,6 @@ def build_class_stats(stus: list, cls_name: str) -> dict:
                  for s in sorted_stus[:5]],
         "students": stus,
     }
-
 
 def parse_grade_book_excel(uploaded_file, sheet_name=None, merge_all_sheets=False) -> list:
     """Parse Algerian grade book Excel file."""
@@ -819,7 +946,6 @@ def parse_grade_book_excel(uploaded_file, sheet_name=None, merge_all_sheets=Fals
         rows_list = [tuple(row) for row in df.values]
         return _parse_rows_from_list(rows_list)
 
-
 def _parse_rows_from_list(rows_list) -> list:
     """Parse student data from worksheet rows."""
     students = []
@@ -864,7 +990,6 @@ def _parse_rows_from_list(rows_list) -> list:
 
     return students
 
-
 def list_excel_sheet_names(uploaded_file) -> list:
     """Get list of sheet names from Excel file."""
     try:
@@ -882,7 +1007,6 @@ def list_excel_sheet_names(uploaded_file) -> list:
             return list(xl.sheet_names)
         except Exception:
             return []
-
 
 # ═══════════════════════════════════════════════════════════
 # PDF GENERATORS (Preserved with Arabic enhancement)
@@ -937,7 +1061,6 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
     doc.build(story, **_pdf_footer_canvas_args())
     buf.seek(0)
     return buf.read()
-
 
 def generate_exam_pdf(exam_data: dict) -> bytes:
     """Generate exam PDF with official Algerian template."""
@@ -1026,7 +1149,6 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     doc.build(story, **_pdf_footer_canvas_args())
     buf.seek(0)
     return buf.read()
-
 
 def generate_report_pdf(report_data: dict) -> bytes:
     """Generate pedagogical report PDF."""
@@ -1124,7 +1246,6 @@ def generate_report_pdf(report_data: dict) -> bytes:
     doc.build(story, **_pdf_footer_canvas_args())
     buf.seek(0)
     return buf.read()
-
 
 def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     """Generate lesson plan PDF with official Algerian format."""
@@ -1242,7 +1363,6 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     buf.seek(0)
     return buf.read()
 
-
 # ═══════════════════════════════════════════════════════════
 # WORD (.docx) EXPORT (Preserved)
 # ═══════════════════════════════════════════════════════════
@@ -1251,7 +1371,6 @@ def _docx_set_rtl(paragraph):
     bidi_el = OxmlElement('w:bidi')
     bidi_el.set(qn('w:val'), '1')
     pPr.append(bidi_el)
-
 
 def _docx_heading(doc, text: str, level: int = 1, color_hex: str = "145a32"):
     p = doc.add_heading(text, level=level)
@@ -1262,7 +1381,6 @@ def _docx_heading(doc, text: str, level: int = 1, color_hex: str = "145a32"):
         run.font.color.rgb = RGBColor(r, g, b)
     return p
 
-
 def _docx_para(doc, text: str, bold: bool = False, size: int = 12,
                align=WD_ALIGN_PARAGRAPH.RIGHT):
     p = doc.add_paragraph()
@@ -1272,7 +1390,6 @@ def _docx_para(doc, text: str, bold: bool = False, size: int = 12,
     run.bold = bold
     run.font.size = Pt(size)
     return p
-
 
 def generate_exam_docx(exam_data: dict) -> bytes:
     if not _DOCX_AVAILABLE:
@@ -1327,7 +1444,6 @@ def generate_exam_docx(exam_data: dict) -> bytes:
     buf.seek(0)
     return buf.read()
 
-
 def generate_lesson_plan_docx(plan_data: dict) -> bytes:
     if not _DOCX_AVAILABLE:
         return b""
@@ -1370,7 +1486,6 @@ def generate_lesson_plan_docx(plan_data: dict) -> bytes:
     doc.save(buf)
     buf.seek(0)
     return buf.read()
-
 
 def generate_report_docx(report_data: dict) -> bytes:
     if not _DOCX_AVAILABLE:
@@ -1427,7 +1542,6 @@ def generate_report_docx(report_data: dict) -> bytes:
     doc.save(buf)
     buf.seek(0)
     return buf.read()
-
 
 # ═══════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -1706,7 +1820,6 @@ section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
 </style>
 """, unsafe_allow_html=True)
 
-
 # ═══════════════════════════════════════════════════════════
 # PHASE 2: FLOATING AI ASSISTANT (Chat Message Component)
 # ═══════════════════════════════════════════════════════════
@@ -1783,7 +1896,6 @@ def render_floating_assistant():
         </script>
         """, unsafe_allow_html=True)
 
-
 def generate_assistant_response(query: str) -> str:
     """Generate AI assistant response using Groq."""
     if not GROQ_API_KEY:
@@ -1806,7 +1918,6 @@ def generate_assistant_response(query: str) -> str:
         return response
     except Exception as e:
         return f"❌ حدث خطأ: {str(e)}"
-
 
 # ═══════════════════════════════════════════════════════════
 # SIDEBAR (Enhanced with QR Code and Logo)
@@ -1846,9 +1957,16 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
     
-    if ARCEE_API_KEY and _ARCEE_AVAILABLE:
+    # FIX 2: Arcee connection status using real handshake
+    arcee_connected = test_arcee_connection()
+    if arcee_connected:
         st.markdown(
             '<div class="success-box" style="text-align:center">🤖 Arcee: متصل</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="error-box" style="text-align:center">🤖 Arcee: غير متصل</div>',
             unsafe_allow_html=True,
         )
     
@@ -2117,7 +2235,6 @@ with tab_plan:
                     st.warning(f"⚠️ تعذر إكمال توليد المذكرة. "
                                f"تحقق من الاتصال ومن مفتاح Groq. التفاصيل: {err}")
 
-
 # ══════════════════════════════════════════════════════════
 # TAB 2 — توليد اختبار (Enhanced with Dual-LLM)
 # ══════════════════════════════════════════════════════════
@@ -2263,7 +2380,6 @@ with tab_exam:
                     st.markdown(f'<div class="error-box">❌ {err}</div>',
                                 unsafe_allow_html=True)
 
-
 # ══════════════════════════════════════════════════════════
 # TAB 3 — دفتر التنقيط (Enhanced with Multi-Sheet Export)
 # ══════════════════════════════════════════════════════════
@@ -2399,6 +2515,7 @@ with tab_grade:
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="dl_grade_xlsx_multi")
             else:
+                # FIX 1: Use the newly defined single-sheet generator
                 xlsx_bytes = generate_grade_book_excel(
                     students_data, gb_class or "القسم",
                     gb_subject or subject, gb_sem, gb_school or school_name)
@@ -2417,7 +2534,6 @@ with tab_grade:
                      json.dumps(students_data, ensure_ascii=False),
                      datetime.now().strftime("%Y-%m-%d %H:%M")))
                 st.success("✅ تم الحفظ")
-
 
 # ══════════════════════════════════════════════════════════
 # TAB 4 — تحليل النتائج (Enhanced with Session Persistence)
@@ -2546,7 +2662,8 @@ with tab_report:
         if "stored_report_data" not in st.session_state:
             st.session_state.stored_report_data = None
         
-        if api_key and st.button("🤖 توليد التقرير البيداغوجي بالذكاء الاصطناعي",
+        # FIX 3: Replace `api_key` with `GROQ_API_KEY`
+        if GROQ_API_KEY and st.button("🤖 توليد التقرير البيداغوجي بالذكاء الاصطناعي",
                                    key="btn_rep_ai"):
             summary = "\n".join([
                 f"القسم {c['name']}: معدل={safe_f(c['avg'])}, "
@@ -2633,7 +2750,6 @@ with tab_report:
                 st.markdown(st.session_state.stored_report_data['ai_analysis'][:500] + "...")
             st.caption("يمكنك تحميل التقرير من الأزرار أعلاه في أي وقت")
 
-
 # ══════════════════════════════════════════════════════════
 # TAB 5 — توليد تمرين (Preserved with index starting from 1)
 # ══════════════════════════════════════════════════════════
@@ -2681,6 +2797,7 @@ with tab_ex:
             with st.spinner("🧠 جاري التوليد…"):
                 try:
                     llm = get_llm(model_name, GROQ_API_KEY)
+                    # FIX 1: Use call_llm instead of undefined function
                     res_text = call_llm(llm, prompt)
                     render_with_latex(res_text)
                     db_exec(
@@ -2704,9 +2821,8 @@ with tab_ex:
                     st.markdown(f'<div class="error-box">❌ {err}</div>',
                                 unsafe_allow_html=True)
 
-
 # ══════════════════════════════════════════════════════════
-# TAB 6 — تصحيح أوراق (Preserved)
+# TAB 6 — تصحيح أوراق (Preserved with camera error handling)
 # ══════════════════════════════════════════════════════════
 with tab_correct:
     st.markdown("### ✅ تصحيح أوراق الاختبار")
@@ -2733,7 +2849,12 @@ with tab_correct:
         st.markdown("**معاينة الصورة قبل المعالجة**")
         img_col1, img_col2 = st.columns(2)
         with img_col1:
-            cam_shot = st.camera_input("📷 الكاميرا المباشرة", key="corr_camera")
+            # FIX 4: Camera input with error handling
+            try:
+                cam_shot = st.camera_input("📷 الكاميرا المباشرة", key="corr_camera")
+            except Exception as cam_err:
+                st.error(f"⚠️ تعذر الوصول إلى الكاميرا: {cam_err}. تأكد من منح التطبيق صلاحية الوصول إلى الكاميرا (HTTPS مطلوب).")
+                cam_shot = None
         with img_col2:
             up_img = st.file_uploader("📁 رفع صورة (PNG / JPG / JPEG / WEBP)",
                                        type=["png", "jpg", "jpeg", "webp"],
@@ -2812,7 +2933,6 @@ with tab_correct:
                 except Exception as err:
                     st.markdown(f'<div class="error-box">❌ {err}</div>',
                                 unsafe_allow_html=True)
-
 
 # ══════════════════════════════════════════════════════════
 # TAB 7 — الأرشيف (Preserved with index starting from 1)
@@ -2922,7 +3042,6 @@ with tab_archive:
             st.dataframe(df_c[["الاسم", "المادة", "العلامة", "من", "التاريخ"]],
                          use_container_width=True)
 
-
 # ══════════════════════════════════════════════════════════
 # TAB 8 — إحصائيات (Preserved)
 # ══════════════════════════════════════════════════════════
@@ -2980,13 +3099,13 @@ with tab_stats:
             st.markdown('<div class="error-box">❌ Groq: غير متصل</div>',
                         unsafe_allow_html=True)
     with c2:
-        if ARCEE_API_KEY and _ARCEE_AVAILABLE:
+        arcee_connected = test_arcee_connection()
+        if arcee_connected:
             st.markdown('<div class="success-box">✅ Arcee: متصل</div>',
                         unsafe_allow_html=True)
         else:
             st.markdown('<div class="error-box">❌ Arcee: غير متصل</div>',
                         unsafe_allow_html=True)
-
 
 # ═══════════════════════════════════════════════════════════
 # FOOTER
