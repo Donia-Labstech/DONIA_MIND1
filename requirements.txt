@@ -12,5 +12,4 @@ python-docx>=0.8.11
 pytesseract>=0.3.10
 xlrd>=2.0.1
 qrcode[pil]>=7.4.0
-arcee>=0.1.0
 lxml>=4.9.0
