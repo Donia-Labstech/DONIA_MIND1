@@ -3116,7 +3116,6 @@ st.markdown(
   <div style="margin-top:.4rem;font-size:.78rem;color:#888">
     DONIA LABS TECH — منصة المعلم الجزائري الذكي | v3.0
   </div>
-</div>
 # ═══════════════════════════════════════════════════════════════════════════
 # DONIA MIND v4.0 – ADDITIVE INTEGRATIONS (Dual‑AI, FPDF2, Audio, Web Search)
 # ═══════════════════════════════════════════════════════════════════════════
