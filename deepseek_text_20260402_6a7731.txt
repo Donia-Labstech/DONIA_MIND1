@@ -1,0 +1,12 @@
+project/
+├── app.py
+├── requirements.txt
+├── assets/
+│   └── logo_donia.jpg
+├── fonts/ (automatically populated on first run)
+│   ├── Amiri-Regular.ttf
+│   ├── Amiri-Bold.ttf
+│   ├── Cairo-Regular.ttf
+│   └── Cairo-Bold.ttf
+└── .streamlit/
+    └── secrets.toml
