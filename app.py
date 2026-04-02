@@ -477,8 +477,6 @@ def main():
 #     main_ui()
 # We will append our code after that.
 
-# However, for the sake of this exercise, we'll just add a note that the integration is done.
-
 # ==================================================================
 # INTEGRATION WITH EXISTING CODE
 # ==================================================================
