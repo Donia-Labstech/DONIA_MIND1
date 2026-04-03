@@ -1449,13 +1449,17 @@ with st.sidebar:
     st.markdown(
         f"""
         <div class="donia-social">
-          <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer" title="WhatsApp">📱 WA</a>
-          <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer" title="LinkedIn">💼 in</a>
-          <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook">📘 f</a>
-          <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer" title="Telegram">✈️ TG</a>
-        </div>
-        """,
-        unsafe_allow_html=True,
+st.markdown(
+    f"""
+    <div class="donia-social">
+      <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer" title="WhatsApp">\U0001F4F1 WA</a>
+      <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer" title="LinkedIn">\U0001F4BC in</a>
+      <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook">\U0001F4D6 f</a>
+      <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer" title="Telegram">✈️ TG</a>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
     )
 
 model_name = DEFAULT_GROQ_MODEL
