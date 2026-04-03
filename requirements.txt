@@ -46,7 +46,4 @@ PyPDF2>=3.0.0
 firebase-admin>=6.2.0
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.1.0
-google-auth-oauthlib>=1.0.0# مكتبات إضافية من القائمة الأولى لضمان التوافق الكامل
-arcee-python>=0.1.0
-tavily-python>=0.3.0
-
+google-auth-oauthlib>=1.0.0
