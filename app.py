@@ -1353,31 +1353,284 @@ section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
 # ========== CONTINUATION FROM PART 1 ==========
 # (Last 20 lines of Part 1 repeated for seamless stitching)
 
-</style>
-""", unsafe_allow_html=True)
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;800&family=Montserrat:wght@400;600;700;800;900&display=swap');
 
-# ========== SIDEBAR (v4.0 with audio input, connectivity dashboard, QR code) ==========
-with st.sidebar:
-    # Logo
-    _logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_donia.jpg")
-    if os.path.isfile(_logo_path):
-        st.image(_logo_path, width=220, caption="DONIA LABS TECH v4.0")
-    
-    # QR Code
-    try:
-        import qrcode
-        from io import BytesIO
-        qr = qrcode.QRCode(version=1, box_size=4, border=2)
-        qr.add_data(APP_URL)
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="#145a32", back_color="white")
-        qr_buf = BytesIO()
-        qr_img.save(qr_buf, format="PNG")
-        qr_buf.seek(0)
-        st.image(qr_buf, caption="مسح للوصول السريع", width=120)
-    except Exception:
-        st.caption("📱 مسح للوصول للتطبيق")
-    
+#MainMenu{visibility:hidden!important}
+footer{visibility:hidden!important}
+header{visibility:hidden!important}
+.stDeployButton{display:none!important}
+[data-testid="stToolbar"]{display:none!important}
+[data-testid="stDecoration"]{display:none!important}
+[data-testid="stStatusWidget"]{display:none!important}
+a[href*="streamlit.io"]{display:none!important}
+
+*,*::before,*::after{font-family:'Cairo','Amiri','Tajawal',sans-serif!important}
+.stApp{background:#ffffff;color:#111111;}
+.main{direction:rtl;text-align:right;color:#111111!important}
+.block-container{color:#111111!important;background:#ffffff;}
+
+/* Force RTL for all Arabic text blocks */
+.stMarkdown, .stTextInput, .stTextArea, .stSelectbox, .stRadio, .stCheckbox, .stButton, .stDataFrame {
+    direction: rtl;
+    text-align: right;
+}
+/* Keep Latin/LTR content left-aligned */
+.ltr-text {
+    direction: ltr;
+    text-align: left;
+}
+
+h1{color:#c0392b!important;font-weight:800!important}
+h2{color:#145a32!important;font-weight:700!important}
+h3{color:#1e8449!important;font-weight:700!important}
+
+.title-card{
+  background:linear-gradient(135deg,#145a32 0%,#1e8449 50%,#27ae60 100%);
+  padding:1.75rem 2rem;border-radius:24px;text-align:center;
+  margin-bottom:1rem;box-shadow:0 16px 48px rgba(20,90,50,.45);
+  border:3px solid #c0392b;
+}
+.title-card h1{color:#ffffff!important;font-size:2.05rem;font-weight:800;margin:0;letter-spacing:.02em}
+.title-card p{color:rgba(255,255,255,.92);font-size:.96rem;margin:.45rem 0 0;line-height:1.65}
+
+.welcome-banner{
+  background:linear-gradient(135deg,#fdfefe,#f9f9f9);
+  border:2px solid #27ae60;border-left:8px solid #c0392b;
+  border-radius:14px;padding:1.1rem 1.5rem;margin:.75rem 0 1.25rem;
+  direction:rtl;text-align:right;
+  font-size:1.05rem;font-weight:600;color:#145a32;
+  box-shadow:0 4px 16px rgba(20,90,50,.12);
+}
+
+/* Floating Assistant */
+.floating-assistant {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  z-index: 1000;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.floating-assistant:hover {
+  transform: scale(1.05);
+}
+.assistant-bubble {
+  background: linear-gradient(135deg, #145a32, #1e8449);
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(20,90,50,.4);
+  border: 2px solid #c0392b;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100%{box-shadow:0 4px 20px rgba(39,174,96,.4)}
+  50%{box-shadow:0 8px 30px rgba(192,57,43,.6)}
+}
+.assistant-bubble svg {
+  width: 40px;
+  height: 40px;
+}
+
+.donia-robot-wrap{display:flex;justify-content:center;align-items:center;margin:.75rem 0}
+.donia-robot{
+  width:88px;height:88px;border-radius:22px;
+  background:linear-gradient(180deg,#145a32,#1e8449);
+  box-shadow:0 0 28px rgba(39,174,96,.55), inset 0 1px 0 rgba(255,255,255,.12);
+  display:flex;align-items:center;justify-content:center;
+  animation:doniaPulse 2.2s ease-in-out infinite;
+  border:2px solid rgba(192,57,43,.6);
+}
+.donia-robot svg{width:64px;height:64px;opacity:.95}
+@keyframes doniaPulse{
+  0%,100%{transform:scale(1);box-shadow:0 0 28px rgba(39,174,96,.45)}
+  50%{transform:scale(1.04);box-shadow:0 0 44px rgba(39,174,96,.85)}
+}
+
+div.stButton>button{
+  background:linear-gradient(135deg,#1e8449,#145a32)!important;color:#ffffff!important;
+  border:none!important;border-radius:18px!important;
+  padding:0.85rem 1.65rem!important;min-height:3.1rem!important;
+  font-weight:800!important;font-size:1.02rem!important;width:100%!important;
+  transition:transform .22s, box-shadow .22s!important;
+  box-shadow:0 6px 22px rgba(30,132,73,.45)!important;
+}
+div.stButton>button:hover{
+  transform:translateY(-3px)!important;
+  box-shadow:0 12px 36px rgba(192,57,43,.5)!important;
+  background:linear-gradient(135deg,#c0392b,#922b21)!important;
+}
+
+.stat-card{background:linear-gradient(135deg,rgba(30,132,73,.1),rgba(39,174,96,.08));
+  border:2px solid #27ae60;border-radius:16px;
+  padding:1.1rem;text-align:center;margin-bottom:.75rem}
+.stat-card h2{font-size:1.85rem;margin:0;color:#145a32!important}
+.stat-card p{margin:0;color:#333;font-size:.86rem}
+
+.feature-card{background:#f9f9f9;border:1px solid #27ae60;
+  border-right:5px solid #1e8449;
+  border-radius:16px;padding:1.25rem;margin:.55rem 0;
+  direction:rtl;text-align:right;color:#111}
+.feature-card h4{color:#1e8449;margin:0 0 .45rem;font-size:1.02rem}
+
+.result-box{background:#f9f9f9;border:1px solid rgba(30,132,73,.3);
+  border-radius:16px;padding:1.45rem;direction:rtl;text-align:right;
+  color:#111;line-height:2;margin:.85rem 0}
+
+.db-item{background:#f4f9f4;border-right:4px solid #1e8449;
+  border-radius:10px;padding:.85rem 1.05rem;margin:.45rem 0;
+  direction:rtl;text-align:right;color:#111}
+
+.error-box{background:rgba(192,57,43,.08);border:2px solid #c0392b;
+  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
+  color:#922b21;margin:.65rem 0;font-weight:600}
+.success-box{background:rgba(30,132,73,.08);border:2px solid #27ae60;
+  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
+  color:#145a32;margin:.65rem 0;font-weight:600}
+.warn-box{background:rgba(243,156,18,.1);border:2px solid #f39c12;
+  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
+  color:#784212;margin:.65rem 0}
+.template-box{background:rgba(30,132,73,.06);border:2px dashed #27ae60;
+  border-radius:14px;padding:1.05rem;direction:rtl;text-align:right;
+  color:#145a32;margin:.65rem 0;font-size:.9rem;line-height:1.85}
+
+.grade-A{color:#1e8449;font-weight:700}
+.grade-B{color:#2e86c1;font-weight:700}
+.grade-C{color:#d4ac0d;font-weight:700}
+.grade-D{color:#c0392b;font-weight:700}
+
+section[data-testid="stSidebar"]{
+  direction:rtl;
+  background:linear-gradient(180deg,#f4fbf6,#eaf6ee)!important;
+  border-left:4px solid #27ae60;
+}
+section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
+
+.stTabs [data-baseweb="tab"]{direction:rtl;font-size:.9rem;font-weight:700;color:#145a32}
+.stTabs [data-baseweb="tab"][aria-selected="true"]{
+  border-bottom:3px solid #c0392b!important;color:#c0392b!important}
+
+.stSelectbox label,.stTextInput label,.stTextArea label,
+.stNumberInput label,.stSlider label,.stFileUploader label,.stRadio label{
+  direction:rtl;text-align:right;color:#145a32!important;font-weight:700}
+
+.api-book-widget{
+  background:linear-gradient(135deg,#f4fbf6,#eaf6ee);
+  border:2px solid #27ae60;border-radius:16px;
+  padding:1.1rem 1.2rem;text-align:center;margin:.5rem 0;
+}
+.api-book-icon{font-size:2.4rem;display:block;margin-bottom:.35rem}
+.api-book-slogan{font-size:1rem;font-weight:800;color:#145a32;
+  display:block;letter-spacing:.03em}
+.api-book-status-active{
+  display:block;margin-top:.4rem;font-size:.88rem;font-weight:700;
+  color:#1e8449;background:#d5f5e3;border-radius:8px;padding:.2rem .7rem;
+}
+.api-book-status-inactive{
+  display:block;margin-top:.4rem;font-size:.88rem;font-weight:700;
+  color:#c0392b;background:#fdecea;border-radius:8px;padding:.2rem .7rem;
+}
+
+.donia-social{display:flex;flex-wrap:wrap;gap:.45rem;justify-content:center;margin:.35rem 0}
+.donia-social a{
+  display:inline-block;padding:.35rem .75rem;border-radius:12px;
+  background:#145a32;color:#ffffff!important;font-weight:700;font-size:.82rem;
+  text-decoration:none!important;border:1px solid #27ae60;
+  transition:transform .2s,box-shadow .2s;
+}
+.donia-social a:hover{
+  transform:translateY(-2px);
+  box-shadow:0 6px 18px rgba(192,57,43,.4);
+  background:#c0392b!important;
+}
+
+.donia-ip-footer{
+  text-align:center;font-size:.85rem;color:#145a32;font-weight:600;
+  padding:1.2rem 0 .5rem;margin-top:1.5rem;
+  border-top:3px solid #27ae60;
+  background:linear-gradient(90deg,#f4fbf6,#fef9f9,#f4fbf6);
+  border-radius:0 0 12px 12px;
+}
+.donia-footer-social{display:flex;flex-wrap:wrap;gap:.6rem;justify-content:center;margin:.5rem 0}
+.donia-footer-social a{
+  display:inline-flex;align-items:center;gap:.3rem;
+  padding:.4rem .9rem;border-radius:20px;
+  background:#145a32;color:#ffffff!important;font-weight:700;font-size:.82rem;
+  text-decoration:none!important;transition:background .2s,transform .2s;
+}
+.donia-footer-social a:hover{background:#c0392b!important;transform:translateY(-2px)}
+
+.donia-slogan-bar{
+  display:flex;flex-direction:column;align-items:center;
+  gap:.3rem;padding:.9rem 1.5rem;margin:.6rem 0;
+  background:linear-gradient(90deg,#145a32 0%,#1e8449 45%,#c0392b 100%);
+  border-radius:14px;
+  box-shadow:0 4px 20px rgba(20,90,50,.3);
+}
+.donia-slogan-ar{
+  font-family:'Cairo','Amiri',sans-serif;
+  font-size:1.35rem;font-weight:800;
+  color:#ffffff;letter-spacing:.04em;
+  text-shadow:0 2px 6px rgba(0,0,0,.3);
+}
+.donia-slogan-en{
+  font-family:'Montserrat',sans-serif;
+  font-size:.9rem;font-weight:600;
+  color:rgba(255,255,255,.88);letter-spacing:.18em;
+  text-transform:uppercase;
+}
+.donia-slogan-divider{
+  width:40px;height:2px;
+  background:rgba(255,255,255,.55);border-radius:2px;
+}
+
+.stButton>button{
+  border-radius:14px!important;
+  font-family:'Cairo',sans-serif!important;
+  font-weight:700!important;
+  font-size:.95rem!important;
+  padding:.55rem 1.4rem!important;
+  border:2px solid #27ae60!important;
+  background:linear-gradient(135deg,#145a32,#1e8449)!important;
+  color:#ffffff!important;
+  transition:all .22s cubic-bezier(.4,0,.2,1)!important;
+  box-shadow:0 4px 14px rgba(20,90,50,.22)!important;
+  letter-spacing:.02em!important;
+}
+.stButton>button:hover{
+  transform:translateY(-3px) scale(1.025)!important;
+  background:linear-gradient(135deg,#c0392b,#e74c3c)!important;
+  border-color:#c0392b!important;
+  box-shadow:0 8px 28px rgba(192,57,43,.45)!important;
+}
+.stButton>button:active{transform:translateY(0) scale(.98)!important}
+
+.feature-card{border-radius:16px!important}
+.success-box{border-radius:12px!important}
+.error-box{border-radius:12px!important}
+.result-box{border-radius:16px!important}
+.template-box{border-radius:12px!important}
+
+.stTextInput>div>div>input,
+.stTextArea>div>div>textarea,
+.stSelectbox>div>div{
+  border-radius:12px!important;
+  border:2px solid #27ae60!important;
+  font-family:'Cairo',sans-serif!important;
+  transition:border-color .2s,box-shadow .2s!important;
+}
+.stTextInput>div>div>input:focus,
+.stTextArea>div>div>textarea:focus{
+  border-color:#c0392b!important;
+  box-shadow:0 0 0 3px rgba(192,57,43,.18)!important;
+}
+</style>
+""", unsafe_allow_html=True)  
     st.markdown("## ⚙️ الإعدادات العامة")
     
     # Real‑time connectivity dashboard
