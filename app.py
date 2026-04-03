@@ -13,7 +13,12 @@ DUAL-AI DEEP-LOGIC ARCHITECTURE (Zero‑Loss Monolithic Protocol)
 ═══════════════════════════════════════════════════════════
 """
 import streamlit as st
-import os, sqlite3, re, json, io, base64
+import os
+import sqlite3
+import re
+import json
+import io
+import base64
 import urllib.request
 from datetime import datetime
 from dotenv import load_dotenv
@@ -98,7 +103,7 @@ WELCOME_MESSAGE_AR = (
     "معاً نصنع مستقبل التعليم الجزائري بذكاء واحترافية."
 )
 
-# Social URLs (unchanged)
+# Social URLs
 SOCIAL_URL_WHATSAPP = os.getenv("DONIA_URL_WHATSAPP", "https://wa.me/213674661737")
 SOCIAL_URL_LINKEDIN = os.getenv(
     "DONIA_URL_LINKEDIN",
@@ -114,22 +119,16 @@ APP_URL = os.getenv("DONIA_APP_URL", "https://donia-mind.streamlit.app")
 # v4.0: LaTeX CLEANING & ARABIC TEXT PROCESSING
 # ═══════════════════════════════════════════════════════════
 def clean_latex(text: str) -> str:
-    """Global LaTeX sanitizer – fixes common LLM output errors."""
-    # Remove spurious backslashes before spaces
     text = re.sub(r'\\(?=\s)', '', text)
-    # Ensure $$ ... $$ are properly isolated
     text = re.sub(r'\$\$([^\$]+?)\$\$', r'$$\1$$', text)
-    # Fix missing closing braces
     brace_count = text.count('{') - text.count('}')
     if brace_count > 0:
         text += '}' * brace_count
-    # Replace invalid LaTeX commands
     text = re.sub(r'\\begin\{align\*\?}', r'\\begin{align*}', text)
     text = re.sub(r'\\end\{align\*\?}', r'\\end{align*}', text)
     return text
 
 def reshape_arabic(text: str) -> str:
-    """Full Arabic reshaping pipeline."""
     if not text:
         return ""
     try:
@@ -139,11 +138,18 @@ def reshape_arabic(text: str) -> str:
     except Exception:
         return text
 
+def get_pdf_mode_for_subject(subject: str):
+    s = (subject or "").strip()
+    if any(lang in s for lang in ["الإنجليزية", "Anglais"]):
+        return False, "English"
+    if any(lang in s for lang in ["الفرنسية", "Français"]):
+        return False, "French"
+    return True, "Arabic"
+
 # ═══════════════════════════════════════════════════════════
 # v4.0: FPDF2 WITH AMIRI FONT (Zero‑Box PDF)
 # ═══════════════════════════════════════════════════════════
 class ArabicFPDF(FPDF):
-    """Custom FPDF class with Arabic support and embedded Amiri font."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.add_font("Amiri", "", "fonts/Amiri-Regular.ttf", uni=True)
@@ -151,13 +157,11 @@ class ArabicFPDF(FPDF):
         self.set_font("Amiri", size=12)
 
     def multi_cell_text(self, text, w, align='R', rtl=True):
-        """Write multi‑line text with automatic reshaping."""
         if rtl:
             text = reshape_arabic(text)
         self.multi_cell(w, 6, text, border=0, align=align)
 
 def ensure_font_files():
-    """Download Amiri fonts if missing (fallback)."""
     os.makedirs("fonts", exist_ok=True)
     pairs = (
         ("Amiri-Regular.ttf", "https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Regular.ttf"),
@@ -173,13 +177,11 @@ def ensure_font_files():
             except Exception:
                 pass
 
-def generate_simple_pdf_v4(content: str, title: str, subtitle: str = "", rtl: bool = True) -> bytes:
-    """Zero‑box PDF using FPDF2 + Amiri."""
+def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool = True) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
     pdf.set_font("Amiri", size=14)
-    # Header
     if rtl:
         pdf.cell(0, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
         pdf.cell(0, 8, reshape_arabic("وزارة التربية الوطنية"), ln=True, align='C')
@@ -189,14 +191,12 @@ def generate_simple_pdf_v4(content: str, title: str, subtitle: str = "", rtl: bo
         pdf.cell(0, 8, "Ministry of Education", ln=True, align='C')
         pdf.cell(0, 8, f"DONIA MIND — {title}", ln=True, align='C')
     pdf.ln(5)
-    # Body
     pdf.set_font("Amiri", size=11)
     for line in content.splitlines():
         line = line.strip()
         if not line:
             pdf.ln(3)
             continue
-        # Detect markdown headers
         if line.startswith("##"):
             pdf.set_font("Amiri", 'B', 12)
             pdf.multi_cell_text(line[2:], 190, align='R' if rtl else 'L', rtl=rtl)
@@ -204,28 +204,18 @@ def generate_simple_pdf_v4(content: str, title: str, subtitle: str = "", rtl: bo
         else:
             pdf.multi_cell_text(line, 190, align='R' if rtl else 'L', rtl=rtl)
         pdf.ln(2)
-    # Footer
     pdf.set_y(-15)
     pdf.set_font("Amiri", size=8)
     pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
     return pdf.output(dest='S').encode('latin1')
 
-# Replace old PDF functions with v4.0 equivalents
-generate_simple_pdf = generate_simple_pdf_v4
-
-# For exam, report, lesson plan PDFs we'll reuse the same engine but with templates.
-# (Will be reimplemented later; for brevity we keep original signatures but redirect to v4)
-def generate_exam_pdf_v4(exam_data: dict) -> bytes:
-    """Exam PDF using FPDF2."""
+def generate_exam_pdf(exam_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
     pdf.set_font("Amiri", size=12)
     subj = exam_data.get("subject", "")
-    rtl = True  # default Arabic
-    if any(lang in subj for lang in ["الإنجليزية", "Anglais", "Français", "الفرنسية"]):
-        rtl = False
-    # Header table simulation
+    rtl, _ = get_pdf_mode_for_subject(subj)
     pdf.set_font("Amiri", size=10)
     pdf.cell(95, 8, reshape_arabic(exam_data.get("school", "")) if rtl else exam_data.get("school", ""), border=1, align='C')
     pdf.cell(95, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية") if rtl else "Algerian Republic", border=1, ln=True, align='C')
@@ -245,16 +235,12 @@ def generate_exam_pdf_v4(exam_data: dict) -> bytes:
             continue
         pdf.multi_cell_text(line, 190, align='R' if rtl else 'L', rtl=rtl)
         pdf.ln(1)
-    # Footer
     pdf.set_y(-15)
     pdf.set_font("Amiri", size=8)
     pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
     return pdf.output(dest='S').encode('latin1')
 
-generate_exam_pdf = generate_exam_pdf_v4
-
-def generate_report_pdf_v4(report_data: dict) -> bytes:
-    """Pedagogical report PDF using FPDF2."""
+def generate_report_pdf(report_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
@@ -287,10 +273,7 @@ def generate_report_pdf_v4(report_data: dict) -> bytes:
     pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
     return pdf.output(dest='S').encode('latin1')
 
-generate_report_pdf = generate_report_pdf_v4
-
-def generate_lesson_plan_pdf_v4(plan_data: dict) -> bytes:
-    """Lesson plan PDF using FPDF2."""
+def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
@@ -301,9 +284,7 @@ def generate_lesson_plan_pdf_v4(plan_data: dict) -> bytes:
     pdf.set_font("Amiri", 'B', 13)
     pdf.cell(0, 8, reshape_arabic(f"مذكرة رقم: ____ | المؤسسة: {plan_data.get('school','')} | الأستاذ(ة): {plan_data.get('teacher','')}"), ln=True, align='R')
     pdf.ln(5)
-    # Table style using cells
     pdf.set_font("Amiri", size=10)
-    # Info rows
     info = [
         ("الميدان", plan_data.get('domain','')), ("المستوى", plan_data.get('grade','')),
         ("الباب", plan_data.get('chapter','')), ("المدة", plan_data.get('duration','')),
@@ -315,12 +296,10 @@ def generate_lesson_plan_pdf_v4(plan_data: dict) -> bytes:
         pdf.cell(45, 7, reshape_arabic(info[i+1][0]), border=1)
         pdf.cell(50, 7, reshape_arabic(info[i+1][1]), border=1, ln=True)
     pdf.ln(5)
-    # Lesson stages
     stages = ["المرحلة", "المدة", "سير الدرس", "التقويم"]
     for s in stages:
         pdf.cell(47.5, 7, reshape_arabic(s), border=1)
     pdf.ln()
-    # Data rows
     rows = [
         ("تهيئة", plan_data.get('duration_t','5 د'), plan_data.get('intro',''), plan_data.get('eval','')),
         ("بناء الموارد", plan_data.get('duration_b','25 د'), plan_data.get('build',''), ""),
@@ -338,7 +317,167 @@ def generate_lesson_plan_pdf_v4(plan_data: dict) -> bytes:
     pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
     return pdf.output(dest='S').encode('latin1')
 
-generate_lesson_plan_pdf = generate_lesson_plan_pdf_v4
+# ═══════════════════════════════════════════════════════════
+# DOCX generators (from original)
+# ═══════════════════════════════════════════════════════════
+def _docx_set_rtl(paragraph):
+    pPr = paragraph._p.get_or_add_pPr()
+    bidi_el = OxmlElement('w:bidi')
+    bidi_el.set(qn('w:val'), '1')
+    pPr.append(bidi_el)
+
+def _docx_heading(doc, text: str, level: int = 1, color_hex: str = "145a32"):
+    p = doc.add_heading(text, level=level)
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _docx_set_rtl(p)
+    for run in p.runs:
+        r, g, b = (int(color_hex[i:i+2], 16) for i in (0, 2, 4))
+        run.font.color.rgb = RGBColor(r, g, b)
+    return p
+
+def _docx_para(doc, text: str, bold: bool = False, size: int = 12, align=WD_ALIGN_PARAGRAPH.RIGHT):
+    p = doc.add_paragraph()
+    p.alignment = align
+    _docx_set_rtl(p)
+    run = p.add_run(text)
+    run.bold = bold
+    run.font.size = Pt(size)
+    return p
+
+def generate_exam_docx(exam_data: dict) -> bytes:
+    if not _DOCX_AVAILABLE:
+        return b""
+    doc = DocxDocument()
+    for section in doc.sections:
+        section.top_margin = Cm(2)
+        section.bottom_margin = Cm(2)
+        section.left_margin = Cm(2.5)
+        section.right_margin = Cm(2.5)
+    hdr = doc.add_table(rows=3, cols=2)
+    hdr.style = 'Table Grid'
+    cells = hdr.rows[0].cells
+    cells[0].text = exam_data.get('school', '')
+    cells[1].text = "الجمهورية الجزائرية الديمقراطية الشعبية"
+    cells = hdr.rows[1].cells
+    cells[0].text = f"السنة الدراسية: {exam_data.get('year', '')}"
+    cells[1].text = "وزارة التربية الوطنية"
+    cells = hdr.rows[2].cells
+    cells[0].text = f"المدة: {exam_data.get('duration', '')}"
+    cells[1].text = (f"المستوى: {exam_data.get('grade', '')}   |   "
+                     f"المقاطعة: {exam_data.get('district', '')}")
+    for row in hdr.rows:
+        for cell in row.cells:
+            for para in cell.paragraphs:
+                para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                _docx_set_rtl(para)
+                for run in para.runs:
+                    run.font.size = Pt(10)
+    doc.add_paragraph()
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _docx_set_rtl(title_p)
+    run = title_p.add_run(f"اختبار {exam_data.get('semester', '')} في مادة {exam_data.get('subject', '')}")
+    run.bold = True
+    run.font.size = Pt(14)
+    doc.add_paragraph()
+    content = exam_data.get('content', '')
+    for line in content.split('\n'):
+        _docx_para(doc, line)
+    doc.add_paragraph()
+    sign_p = doc.add_paragraph("بالتوفيق                                              إنتهى")
+    sign_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+def generate_lesson_plan_docx(plan_data: dict) -> bytes:
+    if not _DOCX_AVAILABLE:
+        return b""
+    doc = DocxDocument()
+    for section in doc.sections:
+        section.top_margin = Cm(2)
+        section.bottom_margin = Cm(2)
+        section.left_margin = Cm(2.5)
+        section.right_margin = Cm(2.5)
+    _docx_heading(doc, "المذكرة البيداغوجية — DONIA MIND", level=1)
+    info_rows = [
+        ["المؤسسة", plan_data.get('school', '')],
+        ["الأستاذ(ة)", plan_data.get('teacher', '')],
+        ["المادة", plan_data.get('subject', '')],
+        ["المستوى", plan_data.get('grade', '')],
+        ["الدرس", plan_data.get('lesson', '')],
+        ["المجال", plan_data.get('domain', '')],
+        ["المدة الإجمالية", plan_data.get('duration', '')],
+    ]
+    tbl = doc.add_table(rows=len(info_rows), cols=2)
+    tbl.style = 'Table Grid'
+    for i, (label, val) in enumerate(info_rows):
+        cells = tbl.rows[i].cells
+        cells[0].text = label
+        cells[1].text = val
+        for cell in cells:
+            for para in cell.paragraphs:
+                para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                _docx_set_rtl(para)
+    doc.add_paragraph()
+    _docx_heading(doc, "محتوى المذكرة", level=2, color_hex="1e8449")
+    content = plan_data.get('content', '')
+    for line in content.split('\n'):
+        _docx_para(doc, line)
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+def generate_report_docx(report_data: dict) -> bytes:
+    if not _DOCX_AVAILABLE:
+        return b""
+    doc = DocxDocument()
+    for section in doc.sections:
+        section.top_margin = Cm(2)
+        section.bottom_margin = Cm(2)
+        section.left_margin = Cm(2.5)
+        section.right_margin = Cm(2.5)
+    _docx_heading(doc, "تقرير تحليل نتائج الأقسام", level=1)
+    _docx_para(doc, f"المادة: {report_data.get('subject', '')}   |   "
+               f"الفصل: {report_data.get('semester', '')}   |   "
+               f"المؤسسة: {report_data.get('school', '')}", bold=True)
+    doc.add_paragraph()
+    for cls in report_data.get('classes', []):
+        _docx_heading(doc, f"القسم: {cls.get('name', '')}", level=2, color_hex="1e8449")
+        stats_rows = [
+            ["عدد التلاميذ", str(cls.get('total', ''))],
+            ["المعدل العام", str(cls.get('avg', ''))],
+            ["أعلى معدل", str(cls.get('max', ''))],
+            ["أدنى معدل", str(cls.get('min', ''))],
+            ["نسبة النجاح %", str(cls.get('pass_rate', ''))],
+        ]
+        tbl = doc.add_table(rows=len(stats_rows), cols=2)
+        tbl.style = 'Table Grid'
+        for i, (label, val) in enumerate(stats_rows):
+            cells = tbl.rows[i].cells
+            cells[0].text = label
+            cells[1].text = val
+            for cell in cells:
+                for para in cell.paragraphs:
+                    para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                    _docx_set_rtl(para)
+        doc.add_paragraph()
+        top5 = cls.get('top5', [])
+        if top5:
+            _docx_para(doc, "أفضل 5 تلاميذ:", bold=True)
+            for idx, s in enumerate(top5, 1):
+                _docx_para(doc, f"  {idx}. {s['name']} — {s['avg']:.2f}")
+        doc.add_paragraph()
+    if report_data.get('ai_analysis'):
+        _docx_heading(doc, "التقرير البيداغوجي (الذكاء الاصطناعي)", level=2, color_hex="922b21")
+        for line in report_data['ai_analysis'].split('\n'):
+            _docx_para(doc, line)
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
 
 # ═══════════════════════════════════════════════════════════
 # v4.0: DUAL-AI CRITIC LAYER (Groq + Arcee Handshake)
@@ -358,9 +497,7 @@ def call_llm(llm, prompt: str) -> str:
     return llm.invoke(prompt).content
 
 def arcee_critic(content: str, subject: str, grade: str) -> dict:
-    """Use Arcee (or fallback Groq critic) to validate pedagogical alignment."""
     if not ARCEE_API_KEY or not _ARCEE_AVAILABLE:
-        # Fallback: use Groq as critic
         try:
             llm = get_llm(DEFAULT_GROQ_MODEL, GROQ_API_KEY)
             critic_prompt = f"""أنت ناقد بيداغوجي جزائري. حلل المحتوى التالي:
@@ -377,9 +514,7 @@ def arcee_critic(content: str, subject: str, grade: str) -> dict:
     "suggestions": "اقتراحات"
 }}"""
             response = call_llm(llm, critic_prompt)
-            # Attempt to parse JSON
             try:
-                import json
                 return json.loads(response)
             except:
                 return {"aligned": True, "score": 7, "remarks": "تعذر التحقق", "suggestions": ""}
@@ -388,14 +523,12 @@ def arcee_critic(content: str, subject: str, grade: str) -> dict:
     else:
         try:
             arcee = get_arcee_client()
-            # Placeholder for actual Arcee validation
             result = arcee.validate(content, f"تحقق من مطابقة المحتوى لمنهاج {subject} المستوى {grade}")
             return {"aligned": True, "score": 9, "remarks": "تم التحقق بنجاح", "suggestions": ""}
         except:
             return {"aligned": True, "score": 7, "remarks": "خطأ في Arcee", "suggestions": ""}
 
 def dual_llm_generate_with_critic(prompt: str, subject: str, grade: str, use_critic: bool = True) -> tuple[str, dict]:
-    """Generate with Groq, then critic (Arcee or Groq) and return validated content + report."""
     if not GROQ_API_KEY:
         return "", {"error": "GROQ_API_KEY missing"}
     llm = get_llm(DEFAULT_GROQ_MODEL, GROQ_API_KEY)
@@ -407,14 +540,12 @@ def dual_llm_generate_with_critic(prompt: str, subject: str, grade: str, use_cri
         critic_report["score"] = critic.get("score", 0)
         critic_report["remarks"] = critic.get("remarks", "")
         critic_report["suggestions"] = critic.get("suggestions", "")
-        # Optionally regenerate if score < 5? We'll just report.
     return generated, critic_report
 
 # ═══════════════════════════════════════════════════════════
 # v4.0: WEB SEARCH (RAG) WITH TAVILY
 # ═══════════════════════════════════════════════════════════
 def web_search(query: str, max_results: int = 3) -> str:
-    """Fetch real‑time educational content from web."""
     if not TAVILY_AVAILABLE or not TAVILY_API_KEY:
         return ""
     try:
@@ -434,16 +565,12 @@ def web_search(query: str, max_results: int = 3) -> str:
 # v4.0: AUDIO INTELLIGENCE (Streamlit Mic Recorder)
 # ═══════════════════════════════════════════════════════════
 def audio_to_text(audio_bytes: bytes) -> str:
-    """Transcribe audio using Groq Whisper (or fallback)."""
     if not GROQ_API_KEY:
         return ""
     try:
-        import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
-        # Use Groq's Whisper API via LangChain? Simpler: use requests
-        import requests
         url = "https://api.groq.com/openai/v1/audio/transcriptions"
         headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
         with open(tmp_path, "rb") as f:
@@ -687,13 +814,10 @@ def list_excel_sheet_names(uploaded_file) -> list:
             return []
 
 def llm_output_language_clause(subject: str) -> str:
-    rtl = True
-    if any(lang in subject for lang in ["الإنجليزية", "Anglais", "Français", "الفرنسية"]):
-        rtl = False
+    rtl, lang = get_pdf_mode_for_subject(subject)
     if rtl:
         return "قاعدة إلزامية: اكتب كل المحتوى (العناوين، الأسئلة، الشروح) بالعربية الفصحى الواضحة."
     else:
-        lang = "English" if "الإنجليزية" in subject or "Anglais" in subject else "French"
         return f"Mandatory: produce the ENTIRE output in {lang}. Do not use Arabic."
 
 # ═══════════════════════════════════════════════════════════
@@ -985,7 +1109,7 @@ def generate_multi_sheet_grade_book(classes_data: list, school_name: str, subjec
     return buf.read()
 
 # ═══════════════════════════════════════════════════════════
-# v4.0: FLOATING ASSISTANT (unchanged but will be enhanced with audio)
+# v4.0: FLOATING ASSISTANT
 # ═══════════════════════════════════════════════════════════
 def render_floating_assistant():
     if "assistant_messages" not in st.session_state:
@@ -1063,12 +1187,11 @@ def generate_assistant_response(query: str) -> str:
         return f"❌ حدث خطأ: {str(e)}"
 
 # ═══════════════════════════════════════════════════════════
-# v4.0: PAGE CONFIG & ENHANCED CSS (RTL + New Styles)
+# PAGE CONFIG & ENHANCED CSS (RTL + New Styles)
 # ═══════════════════════════════════════════════════════════
 st.set_page_config(page_title="DONIA MIND — المعلم الذكي v4.0", page_icon="🎓",
                    layout="wide", initial_sidebar_state="expanded")
 
-# Global RTL enforcement (Arabic content only)
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;800&family=Montserrat:wght@400;600;700;800;900&display=swap');
@@ -1348,374 +1471,13 @@ section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
 </style>
 """, unsafe_allow_html=True)
 
-# ========== CONTINUED IN PART 2 ==========
-# (The remaining ~1500 lines will follow in Part 2, with the last 20 lines of Part 1 repeated at the top of Part 2) 
-# ========== CONTINUATION FROM PART 1 ==========
-# (Last 20 lines of Part 1 repeated for seamless stitching)
-
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;800&family=Montserrat:wght@400;600;700;800;900&display=swap');
-
-#MainMenu{visibility:hidden!important}
-footer{visibility:hidden!important}
-header{visibility:hidden!important}
-.stDeployButton{display:none!important}
-[data-testid="stToolbar"]{display:none!important}
-[data-testid="stDecoration"]{display:none!important}
-[data-testid="stStatusWidget"]{display:none!important}
-a[href*="streamlit.io"]{display:none!important}
-
-*,*::before,*::after{font-family:'Cairo','Amiri','Tajawal',sans-serif!important}
-.stApp{background:#ffffff;color:#111111;}
-.main{direction:rtl;text-align:right;color:#111111!important}
-.block-container{color:#111111!important;background:#ffffff;}
-
-/* Force RTL for all Arabic text blocks */
-.stMarkdown, .stTextInput, .stTextArea, .stSelectbox, .stRadio, .stCheckbox, .stButton, .stDataFrame {
-    direction: rtl;
-    text-align: right;
-}
-/* Keep Latin/LTR content left-aligned */
-.ltr-text {
-    direction: ltr;
-    text-align: left;
-}
-
-h1{color:#c0392b!important;font-weight:800!important}
-h2{color:#145a32!important;font-weight:700!important}
-h3{color:#1e8449!important;font-weight:700!important}
-
-.title-card{
-  background:linear-gradient(135deg,#145a32 0%,#1e8449 50%,#27ae60 100%);
-  padding:1.75rem 2rem;border-radius:24px;text-align:center;
-  margin-bottom:1rem;box-shadow:0 16px 48px rgba(20,90,50,.45);
-  border:3px solid #c0392b;
-}
-.title-card h1{color:#ffffff!important;font-size:2.05rem;font-weight:800;margin:0;letter-spacing:.02em}
-.title-card p{color:rgba(255,255,255,.92);font-size:.96rem;margin:.45rem 0 0;line-height:1.65}
-
-.welcome-banner{
-  background:linear-gradient(135deg,#fdfefe,#f9f9f9);
-  border:2px solid #27ae60;border-left:8px solid #c0392b;
-  border-radius:14px;padding:1.1rem 1.5rem;margin:.75rem 0 1.25rem;
-  direction:rtl;text-align:right;
-  font-size:1.05rem;font-weight:600;color:#145a32;
-  box-shadow:0 4px 16px rgba(20,90,50,.12);
-}
-
-/* Floating Assistant */
-.floating-assistant {
-  position: fixed;
-  bottom: 80px;
-  right: 20px;
-  z-index: 1000;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-.floating-assistant:hover {
-  transform: scale(1.05);
-}
-.assistant-bubble {
-  background: linear-gradient(135deg, #145a32, #1e8449);
-  border-radius: 50%;
-  width: 60px;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 20px rgba(20,90,50,.4);
-  border: 2px solid #c0392b;
-  animation: pulse 2s ease-in-out infinite;
-}
-@keyframes pulse {
-  0%,100%{box-shadow:0 4px 20px rgba(39,174,96,.4)}
-  50%{box-shadow:0 8px 30px rgba(192,57,43,.6)}
-}
-.assistant-bubble svg {
-  width: 40px;
-  height: 40px;
-}
-
-.donia-robot-wrap{display:flex;justify-content:center;align-items:center;margin:.75rem 0}
-.donia-robot{
-  width:88px;height:88px;border-radius:22px;
-  background:linear-gradient(180deg,#145a32,#1e8449);
-  box-shadow:0 0 28px rgba(39,174,96,.55), inset 0 1px 0 rgba(255,255,255,.12);
-  display:flex;align-items:center;justify-content:center;
-  animation:doniaPulse 2.2s ease-in-out infinite;
-  border:2px solid rgba(192,57,43,.6);
-}
-.donia-robot svg{width:64px;height:64px;opacity:.95}
-@keyframes doniaPulse{
-  0%,100%{transform:scale(1);box-shadow:0 0 28px rgba(39,174,96,.45)}
-  50%{transform:scale(1.04);box-shadow:0 0 44px rgba(39,174,96,.85)}
-}
-
-div.stButton>button{
-  background:linear-gradient(135deg,#1e8449,#145a32)!important;color:#ffffff!important;
-  border:none!important;border-radius:18px!important;
-  padding:0.85rem 1.65rem!important;min-height:3.1rem!important;
-  font-weight:800!important;font-size:1.02rem!important;width:100%!important;
-  transition:transform .22s, box-shadow .22s!important;
-  box-shadow:0 6px 22px rgba(30,132,73,.45)!important;
-}
-div.stButton>button:hover{
-  transform:translateY(-3px)!important;
-  box-shadow:0 12px 36px rgba(192,57,43,.5)!important;
-  background:linear-gradient(135deg,#c0392b,#922b21)!important;
-}
-
-.stat-card{background:linear-gradient(135deg,rgba(30,132,73,.1),rgba(39,174,96,.08));
-  border:2px solid #27ae60;border-radius:16px;
-  padding:1.1rem;text-align:center;margin-bottom:.75rem}
-.stat-card h2{font-size:1.85rem;margin:0;color:#145a32!important}
-.stat-card p{margin:0;color:#333;font-size:.86rem}
-
-.feature-card{background:#f9f9f9;border:1px solid #27ae60;
-  border-right:5px solid #1e8449;
-  border-radius:16px;padding:1.25rem;margin:.55rem 0;
-  direction:rtl;text-align:right;color:#111}
-.feature-card h4{color:#1e8449;margin:0 0 .45rem;font-size:1.02rem}
-
-.result-box{background:#f9f9f9;border:1px solid rgba(30,132,73,.3);
-  border-radius:16px;padding:1.45rem;direction:rtl;text-align:right;
-  color:#111;line-height:2;margin:.85rem 0}
-
-.db-item{background:#f4f9f4;border-right:4px solid #1e8449;
-  border-radius:10px;padding:.85rem 1.05rem;margin:.45rem 0;
-  direction:rtl;text-align:right;color:#111}
-
-.error-box{background:rgba(192,57,43,.08);border:2px solid #c0392b;
-  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
-  color:#922b21;margin:.65rem 0;font-weight:600}
-.success-box{background:rgba(30,132,73,.08);border:2px solid #27ae60;
-  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
-  color:#145a32;margin:.65rem 0;font-weight:600}
-.warn-box{background:rgba(243,156,18,.1);border:2px solid #f39c12;
-  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
-  color:#784212;margin:.65rem 0}
-.template-box{background:rgba(30,132,73,.06);border:2px dashed #27ae60;
-  border-radius:14px;padding:1.05rem;direction:rtl;text-align:right;
-  color:#145a32;margin:.65rem 0;font-size:.9rem;line-height:1.85}
-
-.grade-A{color:#1e8449;font-weight:700}
-.grade-B{color:#2e86c1;font-weight:700}
-.grade-C{color:#d4ac0d;font-weight:700}
-.grade-D{color:#c0392b;font-weight:700}
-
-section[data-testid="stSidebar"]{
-  direction:rtl;
-  background:linear-gradient(180deg,#f4fbf6,#eaf6ee)!important;
-  border-left:4px solid #27ae60;
-}
-section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
-
-.stTabs [data-baseweb="tab"]{direction:rtl;font-size:.9rem;font-weight:700;color:#145a32}
-.stTabs [data-baseweb="tab"][aria-selected="true"]{
-  border-bottom:3px solid #c0392b!important;color:#c0392b!important}
-
-.stSelectbox label,.stTextInput label,.stTextArea label,
-.stNumberInput label,.stSlider label,.stFileUploader label,.stRadio label{
-  direction:rtl;text-align:right;color:#145a32!important;font-weight:700}
-
-.api-book-widget{
-  background:linear-gradient(135deg,#f4fbf6,#eaf6ee);
-  border:2px solid #27ae60;border-radius:16px;
-  padding:1.1rem 1.2rem;text-align:center;margin:.5rem 0;
-}
-.api-book-icon{font-size:2.4rem;display:block;margin-bottom:.35rem}
-.api-book-slogan{font-size:1rem;font-weight:800;color:#145a32;
-  display:block;letter-spacing:.03em}
-.api-book-status-active{
-  display:block;margin-top:.4rem;font-size:.88rem;font-weight:700;
-  color:#1e8449;background:#d5f5e3;border-radius:8px;padding:.2rem .7rem;
-}
-.api-book-status-inactive{
-  display:block;margin-top:.4rem;font-size:.88rem;font-weight:700;
-  color:#c0392b;background:#fdecea;border-radius:8px;padding:.2rem .7rem;
-}
-
-.donia-social{display:flex;flex-wrap:wrap;gap:.45rem;justify-content:center;margin:.35rem 0}
-.donia-social a{
-  display:inline-block;padding:.35rem .75rem;border-radius:12px;
-  background:#145a32;color:#ffffff!important;font-weight:700;font-size:.82rem;
-  text-decoration:none!important;border:1px solid #27ae60;
-  transition:transform .2s,box-shadow .2s;
-}
-.donia-social a:hover{
-  transform:translateY(-2px);
-  box-shadow:0 6px 18px rgba(192,57,43,.4);
-  background:#c0392b!important;
-}
-
-.donia-ip-footer{
-  text-align:center;font-size:.85rem;color:#145a32;font-weight:600;
-  padding:1.2rem 0 .5rem;margin-top:1.5rem;
-  border-top:3px solid #27ae60;
-  background:linear-gradient(90deg,#f4fbf6,#fef9f9,#f4fbf6);
-  border-radius:0 0 12px 12px;
-}
-.donia-footer-social{display:flex;flex-wrap:wrap;gap:.6rem;justify-content:center;margin:.5rem 0}
-.donia-footer-social a{
-  display:inline-flex;align-items:center;gap:.3rem;
-  padding:.4rem .9rem;border-radius:20px;
-  background:#145a32;color:#ffffff!important;font-weight:700;font-size:.82rem;
-  text-decoration:none!important;transition:background .2s,transform .2s;
-}
-.donia-footer-social a:hover{background:#c0392b!important;transform:translateY(-2px)}
-
-.donia-slogan-bar{
-  display:flex;flex-direction:column;align-items:center;
-  gap:.3rem;padding:.9rem 1.5rem;margin:.6rem 0;
-  background:linear-gradient(90deg,#145a32 0%,#1e8449 45%,#c0392b 100%);
-  border-radius:14px;
-  box-shadow:0 4px 20px rgba(20,90,50,.3);
-}
-.donia-slogan-ar{
-  font-family:'Cairo','Amiri',sans-serif;
-  font-size:1.35rem;font-weight:800;
-  color:#ffffff;letter-spacing:.04em;
-  text-shadow:0 2px 6px rgba(0,0,0,.3);
-}
-.donia-slogan-en{
-  font-family:'Montserrat',sans-serif;
-  font-size:.9rem;font-weight:600;
-  color:rgba(255,255,255,.88);letter-spacing:.18em;
-  text-transform:uppercase;
-}
-.donia-slogan-divider{
-  width:40px;height:2px;
-  background:rgba(255,255,255,.55);border-radius:2px;
-}
-
-.stButton>button{
-  border-radius:14px!important;
-  font-family:'Cairo',sans-serif!important;
-  font-weight:700!important;
-  font-size:.95rem!important;
-  padding:.55rem 1.4rem!important;
-  border:2px solid #27ae60!important;
-  background:linear-gradient(135deg,#145a32,#1e8449)!important;
-  color:#ffffff!important;
-  transition:all .22s cubic-bezier(.4,0,.2,1)!important;
-  box-shadow:0 4px 14px rgba(20,90,50,.22)!important;
-  letter-spacing:.02em!important;
-}
-.stButton>button:hover{
-  transform:translateY(-3px) scale(1.025)!important;
-  background:linear-gradient(135deg,#c0392b,#e74c3c)!important;
-  border-color:#c0392b!important;
-  box-shadow:0 8px 28px rgba(192,57,43,.45)!important;
-}
-.stButton>button:active{transform:translateY(0) scale(.98)!important}
-
-.feature-card{border-radius:16px!important}
-.success-box{border-radius:12px!important}
-.error-box{border-radius:12px!important}
-.result-box{border-radius:16px!important}
-.template-box{border-radius:12px!important}
-
-.stTextInput>div>div>input,
-.stTextArea>div>div>textarea,
-.stSelectbox>div>div{
-  border-radius:12px!important;
-  border:2px solid #27ae60!important;
-  font-family:'Cairo',sans-serif!important;
-  transition:border-color .2s,box-shadow .2s!important;
-}
-.stTextInput>div>div>input:focus,
-.stTextArea>div>div>textarea:focus{
-  border-color:#c0392b!important;
-  box-shadow:0 0 0 3px rgba(192,57,43,.18)!important;
-}
-</style>
-""", unsafe_allow_html=True)  
+# ========== SIDEBAR ==========
 with st.sidebar:
-    st.markdown("## ⚙️ الإعدادات العامة")
-    # ... (your existing sidebar content)    
-    # Real‑time connectivity dashboard
-    st.markdown("### 🔌 حالة الاتصال")
-    col1, col2 = st.columns(2)
-    with col1:
-        if GROQ_API_KEY:
-            st.markdown('<div class="success-box" style="text-align:center">✅ Groq: متصل</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="error-box" style="text-align:center">❌ Groq: غير متصل</div>', unsafe_allow_html=True)
-    with col2:
-        arcee_connected = False
-        if _ARCEE_AVAILABLE and ARCEE_API_KEY:
-            try:
-                arcee_client = Arcee(api_key=ARCEE_API_KEY)
-                arcee_connected = arcee_client is not None
-            except:
-                pass
-        if arcee_connected:
-            st.markdown('<div class="success-box" style="text-align:center">✅ Arcee: متصل</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="error-box" style="text-align:center">❌ Arcee: غير متصل</div>', unsafe_allow_html=True)
-    
-    # Audio input (microphone)
-    st.markdown("### 🎤 إدخال صوتي")
-    if MIC_AVAILABLE:
-        audio_bytes = mic_recorder(start_prompt="🎙️ اضغط للتسجيل", stop_prompt="⏹️ إيقاف", key="mic_recorder")
-        if audio_bytes:
-            with st.spinner("جاري تحويل الصوت إلى نص..."):
-                transcribed = audio_to_text(audio_bytes)
-                if transcribed:
-                    st.success(f"تم التعرف: {transcribed[:100]}...")
-                    st.session_state["voice_text"] = transcribed
-                    st.info("يمكنك استخدام هذا النص في أي حقل إدخال أدناه.")
-                else:
-                    st.error("لم يتم التعرف على الصوت. تأكد من وضوح التسجيل.")
-    else:
-        st.warning("⚠️ streamlit-mic-recorder غير مثبت. لتثبيت: pip install streamlit-mic-recorder")
-    
-    # Web search toggle (RAG)
-    enable_web_search = st.checkbox("🌐 تمكين البحث عبر الإنترنت (Tavily)", value=False, key="global_web_search")
-    if enable_web_search and not TAVILY_API_KEY:
-        st.error("مفتاح Tavily غير موجود. أضف TAVILY_API_KEY في secrets.")
-    
-    # Rest of original sidebar (level, grade, branch, subject, school info)
-    level = st.selectbox("🏫 الطور التعليمي", list(CURRICULUM.keys()))
-    info = CURRICULUM[level]
-    grade = st.selectbox("📚 السنة الدراسية", info["grades"])
-    branch = None
-    if info["branches"] and grade in info["branches"]:
-        branch = st.selectbox("🎯 الشعبة", list(info["branches"][grade].keys()))
-    if info["subjects"]:
-        subj_list = info["subjects"].get(grade) or info["subjects"].get("_default", [])
-    elif info["branches"] and grade in info["branches"] and branch:
-        subj_list = info["branches"][grade][branch]
-    else:
-        subj_list = []
-    subject = (st.selectbox("📖 المادة", subj_list) if subj_list else st.text_input("📖 المادة", key="sb_subject"))
-    
-    st.markdown("---")
-    st.markdown("**🏫 معلومات المؤسسة**")
-    school_name = st.text_input("اسم المتوسطة / الثانوية", placeholder="متوسطة الشهيد...", key="school_name")
-    teacher_name = st.text_input("اسم الأستاذ(ة)", placeholder="الأستاذ(ة)...", key="teacher_name")
-    wilaya = st.text_input("الولاية", placeholder="الجزائر...", key="wilaya")
-    school_year = st.text_input("السنة الدراسية", value="2025/2026", key="syear")
-    
-    st.markdown("---")
-    st.markdown("**تواصل — DONIA LABS TECH**")
-    st.markdown(
-        f"""
-        <div class="donia-social">
-          <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer" title="WhatsApp">\U0001F4F1 WA</a>
-          <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer" title="LinkedIn">\U0001F4BC in</a>
-          <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook">\U0001F4D6 f</a>
-          <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer" title="Telegram">✈️ TG</a>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )   # ← Make sure this closing parenthesis existswith st.sidebar:
     # Logo
     _logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_donia.jpg")
     if os.path.isfile(_logo_path):
         st.image(_logo_path, width=220, caption="DONIA LABS TECH v4.0")
-    
+
     # QR Code
     try:
         import qrcode
@@ -1730,9 +1492,9 @@ with st.sidebar:
         st.image(qr_buf, caption="مسح للوصول السريع", width=120)
     except Exception:
         st.caption("📱 مسح للوصول للتطبيق")
-    
+
     st.markdown("## ⚙️ الإعدادات العامة")
-    
+
     # Real‑time connectivity dashboard
     st.markdown("### 🔌 حالة الاتصال")
     col1, col2 = st.columns(2)
@@ -1753,7 +1515,7 @@ with st.sidebar:
             st.markdown('<div class="success-box" style="text-align:center">✅ Arcee: متصل</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="error-box" style="text-align:center">❌ Arcee: غير متصل</div>', unsafe_allow_html=True)
-    
+
     # Audio input (microphone)
     st.markdown("### 🎤 إدخال صوتي")
     if MIC_AVAILABLE:
@@ -1769,12 +1531,12 @@ with st.sidebar:
                     st.error("لم يتم التعرف على الصوت. تأكد من وضوح التسجيل.")
     else:
         st.warning("⚠️ streamlit-mic-recorder غير مثبت. لتثبيت: pip install streamlit-mic-recorder")
-    
+
     # Web search toggle (RAG)
     enable_web_search = st.checkbox("🌐 تمكين البحث عبر الإنترنت (Tavily)", value=False, key="global_web_search")
     if enable_web_search and not TAVILY_API_KEY:
         st.error("مفتاح Tavily غير موجود. أضف TAVILY_API_KEY في secrets.")
-    
+
     # Rest of original sidebar (level, grade, branch, subject, school info)
     level = st.selectbox("🏫 الطور التعليمي", list(CURRICULUM.keys()))
     info = CURRICULUM[level]
@@ -1789,92 +1551,19 @@ with st.sidebar:
     else:
         subj_list = []
     subject = (st.selectbox("📖 المادة", subj_list) if subj_list else st.text_input("📖 المادة", key="sb_subject"))
-    
+
     st.markdown("---")
     st.markdown("**🏫 معلومات المؤسسة**")
     school_name = st.text_input("اسم المتوسطة / الثانوية", placeholder="متوسطة الشهيد...", key="school_name")
     teacher_name = st.text_input("اسم الأستاذ(ة)", placeholder="الأستاذ(ة)...", key="teacher_name")
     wilaya = st.text_input("الولاية", placeholder="الجزائر...", key="wilaya")
     school_year = st.text_input("السنة الدراسية", value="2025/2026", key="syear")
-    
+
     st.markdown("---")
     st.markdown("**تواصل — DONIA LABS TECH**")
-   st.markdown(
-    f"""
-<div class="donia-ip-footer">
-  <div style="margin-bottom:.5rem;font-size:1rem">
-    {COPYRIGHT_FOOTER_AR}
-  </div>
-  <div class="donia-footer-social">
-    <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer">
-      \U0001F4F1 واتساب
-    </a>
-    <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer">
-      \U0001F4D6 فيسبوك
-    </a>
-    <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer">
-      ✈️ تيليغرام
-    </a>
-    <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer">
-      \U0001F4BC لينكدإن
-    </a>
-  </div>
-  <div style="margin-top:.4rem;font-size:.78rem;color:#888">
-    DONIA LABS TECH — منصة المعلم الجزائري الذكي | v4.0 (Dual‑Intelligence Edition)
-  </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-<div class="donia-ip-footer">
-  <div style="margin-bottom:.5rem;font-size:1rem">
-    {COPYRIGHT_FOOTER_AR}
-  </div>
-  <div class="donia-footer-social">
-    <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer">
-      \U0001F4F1 واتساب
-    </a>
-    <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer">
-      \U0001F4D6 فيسبوك
-    </a>
-    <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer">
-      ✈️ تيليغرام
-    </a>
-    <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer">
-      \U0001F4BC لينكدإن
-    </a>
-  </div>
-  <div style="margin-top:.4rem;font-size:.78rem;color:#888">
-    DONIA LABS TECH — منصة المعلم الجزائري الذكي | v4.0 (Dual‑Intelligence Edition)
-  </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)<div class="donia-ip-footer">
-  <div style="margin-bottom:.5rem;font-size:1rem">
-    {COPYRIGHT_FOOTER_AR}
-  </div>
-  <div class="donia-footer-social">
-    <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer">
-      \U0001F4F1 واتساب
-    </a>
-    <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer">
-      \U0001F4D6 فيسبوك
-    </a>
-    <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer">
-      ✈️ تيليغرام
-    </a>
-    <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer">
-      \U0001F4BC لينكدإن
-    </a>
-  </div>
-  <div style="margin-top:.4rem;font-size:.78rem;color:#888">
-    DONIA LABS TECH — منصة المعلم الجزائري الذكي | v4.0 (Dual‑Intelligence Edition)
-  </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)        <div class="donia-social">
+    st.markdown(
+        f"""
+        <div class="donia-social">
           <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer" title="WhatsApp">\U0001F4F1 WA</a>
           <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer" title="LinkedIn">\U0001F4BC in</a>
           <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook">\U0001F4D6 f</a>
@@ -1882,57 +1571,17 @@ with st.sidebar:
         </div>
         """,
         unsafe_allow_html=True,
-  st.markdown(
-    f"""
-<div class="donia-ip-footer">
-  <div style="margin-bottom:.5rem;font-size:1rem">
-    {COPYRIGHT_FOOTER_AR}
-  </div>
-  <div class="donia-footer-social">
-    <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer">
-      \U0001F4F1 واتساب
-    </a>
-    <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer">
-      \U0001F4D6 فيسبوك
-    </a>
-    <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer">
-      ✈️ تيليغرام
-    </a>
-    <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer">
-      \U0001F4BC لينكدإن
-    </a>
-  </div>
-  <div style="margin-top:.4rem;font-size:.78rem;color:#888">
-    DONIA LABS TECH — منصة المعلم الجزائري الذكي | v4.0 (Dual‑Intelligence Edition)
-  </div>
+    )
+
+# ========== HEADER ==========
+st.markdown("""
+<div class="donia-slogan-bar">
+  <span class="donia-slogan-ar">بالعلم نرتقي</span>
+  <div class="donia-slogan-divider"></div>
+  <span class="donia-slogan-en">Education Uplifts Us</span>
 </div>
-""",
-    unsafe_allow_html=True,
-)
-  <div style="margin-bottom:.5rem;font-size:1rem">
-    {COPYRIGHT_FOOTER_AR}
-  </div>
-  <div class="donia-footer-social">
-    <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer">
-      \U0001F4F1 واتساب
-    </a>
-    <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer">
-      \U0001F4D6 فيسبوك
-    </a>
-    <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer">
-      ✈️ تيليغرام
-    </a>
-    <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer">
-      \U0001F4BC لينكدإن
-    </a>
-  </div>
-  <div style="margin-top:.4rem;font-size:.78rem;color:#888">
-    DONIA LABS TECH — منصة المعلم الجزائري الذكي | v4.0 (Dual‑Intelligence Edition)
-  </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
+
 st.markdown(f"""
 <div class="title-card">
     <h1 style="color:#ffffff!important;font-family:'Cairo',sans-serif">🎓 DONIA MIND — المعلم الذكي v4.0</h1>
@@ -1973,7 +1622,7 @@ st.markdown(f'<div class="welcome-banner">🌟 {WELCOME_MESSAGE_AR}</div>', unsa
 # Render floating assistant
 render_floating_assistant()
 
-# ========== TABS (unchanged order, but each enhanced with dual‑AI and web search) ==========
+# ========== TABS ==========
 (tab_plan, tab_exam, tab_grade, tab_report,
  tab_ex, tab_correct, tab_archive, tab_stats) = st.tabs([
     "📝 مذكرة الدرس", "📄 توليد اختبار", "📊 دفتر التنقيط",
@@ -1983,7 +1632,7 @@ render_floating_assistant()
 
 branch_txt = f" – {branch}" if branch else ""
 
-# ========== TAB 1 — Lesson Plan (v4.0 with dual‑AI + web search) ==========
+# ========== TAB 1 — Lesson Plan ==========
 with tab_plan:
     st.markdown("### 📝 إعداد المذكرة وفق الصيغة الرسمية الجزائرية")
     st.markdown(
@@ -2024,7 +1673,6 @@ with tab_plan:
         elif not plan_lesson.strip():
             st.warning("⚠️ أدخل عنوان الدرس / المورد المعرفي لإكمال المذكرة.")
         else:
-            # Optional web search context
             web_context = ""
             if enable_web_search and web_enhance:
                 with st.spinner("🌐 جلب معلومات إضافية من الإنترنت..."):
@@ -2032,7 +1680,6 @@ with tab_plan:
                     web_context = web_search(search_query)
                     if web_context:
                         web_context = f"\nمعلومات إضافية من الإنترنت:\n{web_context}\n"
-            
             prompt = f"""أنت أستاذ جزائري خبير. أعدّ مذكرة درس رسمية وفق المنهاج الجزائري.
 
 المعطيات:
@@ -2076,7 +1723,6 @@ with tab_plan:
 
 ## نقد ذاتي
 [ملاحظات بيداغوجية لما بعد الحصة]"""
-
             with st.spinner("📝 جاري إعداد المذكرة..."):
                 try:
                     plan_text, critic_report = dual_llm_generate_with_critic(prompt, subject, grade, use_critic=use_critic)
@@ -2141,7 +1787,7 @@ with tab_plan:
                 except Exception as err:
                     st.error(f"⚠️ تعذر إكمال توليد المذكرة: {err}")
 
-# ========== TAB 2 — Exam Generation (v4.0) ==========
+# ========== TAB 2 — Exam Generation ==========
 with tab_exam:
     st.markdown("### 📄 توليد ورقة الاختبار وفق النموذج الجزائري الرسمي")
     st.markdown(
@@ -2189,7 +1835,6 @@ with tab_exam:
                     web_ctx = web_search(f"اختبار {subject} {grade} {exam_semester} جزائري")
                     if web_ctx:
                         web_ctx = f"\nمقترحات من الإنترنت:\n{web_ctx}\n"
-
             prompt = f"""أنت أستاذ جزائري خبير في إعداد الاختبارات. أعدّ ورقة اختبار رسمية.
 
 المعطيات:
@@ -2235,7 +1880,6 @@ with tab_exam:
 • Numbered questions, progressive difficulty"""
 ) + """
 """
-
             with st.spinner("📄 جاري توليد الاختبار..."):
                 try:
                     exam_content, critic_report = dual_llm_generate_with_critic(prompt, subject, grade, use_critic=use_critic_exam)
@@ -2283,7 +1927,7 @@ with tab_exam:
                 except Exception as err:
                     st.error(f"❌ {err}")
 
-# ========== TAB 3 — Grade Book (unchanged from original, but uses v4 PDF for reports) ==========
+# ========== TAB 3 — Grade Book ==========
 with tab_grade:
     st.markdown("### 📊 دفتر التنقيط الرسمي")
     grade_mode = st.radio("وضع الإدخال:",
@@ -2418,7 +2062,7 @@ with tab_grade:
                      datetime.now().strftime("%Y-%m-%d %H:%M")))
                 st.success("✅ تم الحفظ")
 
-# ========== TAB 4 — Report Analysis (v4.0 with AI analysis using dual‑AI) ==========
+# ========== TAB 4 — Report Analysis ==========
 with tab_report:
     st.markdown("### 📈 تحليل نتائج الأقسام (تقرير شامل)")
     rep_mode = st.radio("مصدر البيانات:",
@@ -2593,7 +2237,7 @@ with tab_report:
                                        ".wordprocessingml.document",
                                        key="dl_report_docx2")
 
-# ========== TAB 5 — Exercise Generation (unchanged) ==========
+# ========== TAB 5 — Exercise Generation ==========
 with tab_ex:
     st.markdown("### ✏️ توليد تمرين مع الحل التفصيلي")
     c1, c2, c3 = st.columns([4, 1, 1])
@@ -2636,7 +2280,7 @@ with tab_ex:
 [توجيهات بيداغوجية]"""
             with st.spinner("🧠 جاري التوليد…"):
                 try:
-                    llm = get_llm(model_name, GROQ_API_KEY)
+                    llm = get_llm(DEFAULT_GROQ_MODEL, GROQ_API_KEY)
                     res_text = call_llm(llm, prompt)
                     render_with_latex(res_text)
                     db_exec(
@@ -2651,15 +2295,14 @@ with tab_ex:
                         st.download_button("📥 نص", res_text.encode("utf-8-sig"),
                                            f"{lesson}.txt", key="dl_ex_txt")
                     with d2:
-                        pdf_ex = generate_simple_pdf(
-                            res_text, lesson, f"{subject} | {grade}",
-                            rtl=get_pdf_mode_for_subject(subject)[0])
+                        rtl, _ = get_pdf_mode_for_subject(subject)
+                        pdf_ex = generate_simple_pdf(res_text, lesson, f"{subject} | {grade}", rtl=rtl)
                         st.download_button("📄 PDF", pdf_ex, f"{lesson}.pdf",
                                            "application/pdf", key="dl_ex_pdf")
                 except Exception as err:
                     st.error(f"❌ {err}")
 
-# ========== TAB 6 — Correction (fixed camera error handling) ==========
+# ========== TAB 6 — Correction ==========
 with tab_correct:
     st.markdown("### ✅ تصحيح أوراق الاختبار")
     correct_mode = st.radio("وضع التصحيح:",
@@ -2739,7 +2382,7 @@ with tab_correct:
 ## ملاحظة للأستاذ"""
             with st.spinner("🔍 جاري التصحيح…"):
                 try:
-                    llm = get_llm(model_name, GROQ_API_KEY)
+                    llm = get_llm(DEFAULT_GROQ_MODEL, GROQ_API_KEY)
                     correction = call_llm(llm, prompt_corr)
                     render_with_latex(correction)
                     m = re.search(r'(\d+(?:\.\d+)?)\s*/' + str(total_marks), correction)
@@ -2751,16 +2394,16 @@ with tab_correct:
                         (student_name or "مجهول", exam_subj, gv, total_marks,
                          correction, datetime.now().strftime("%Y-%m-%d %H:%M")))
                     st.success(f"✅ العلامة: {gv}/{total_marks}")
+                    rtl, _ = get_pdf_mode_for_subject(exam_subj)
                     pdf_c = generate_simple_pdf(
-                        correction, f"تصحيح: {student_name or 'طالب'}", exam_subj,
-                        rtl=get_pdf_mode_for_subject(exam_subj)[0])
+                        correction, f"تصحيح: {student_name or 'طالب'}", exam_subj, rtl=rtl)
                     st.download_button("📄 تحميل التصحيح PDF", pdf_c,
                                        f"تصحيح_{student_name or 'طالب'}.pdf",
                                        "application/pdf", key="dl_corr_pdf")
                 except Exception as err:
                     st.error(f"❌ {err}")
 
-# ========== TAB 7 — Archive (unchanged) ==========
+# ========== TAB 7 — Archive ==========
 with tab_archive:
     st.markdown("### 🗄️ الأرشيف الشامل")
     arch_tabs = st.tabs(["📚 التمارين", "📝 المذكرات", "📄 الاختبارات", "✅ التصحيحات"])
@@ -2781,7 +2424,8 @@ with tab_archive:
                     st.download_button("📥 نص", cont.encode("utf-8-sig"),
                                        f"{les}.txt", key=f"dl_{ex_id}")
                 with b2:
-                    px2 = generate_simple_pdf(cont, les, rtl=get_pdf_mode_for_subject(sub)[0])
+                    rtl, _ = get_pdf_mode_for_subject(sub)
+                    px2 = generate_simple_pdf(cont, les, rtl=rtl)
                     st.download_button("📄 PDF", px2, f"{les}.pdf",
                                        "application/pdf", key=f"pdf_{ex_id}")
                 with b3:
@@ -2820,8 +2464,8 @@ with tab_archive:
                     st.download_button("📥 نص", cont.encode("utf-8-sig"),
                                        f"مذكرة_{les}.txt", key=f"pln_{pid}")
                 with pp2:
-                    ppdf = generate_simple_pdf(cont, f"مذكرة: {les}", f"{sub} | {gr}",
-                        rtl=get_pdf_mode_for_subject(sub)[0])
+                    rtl, _ = get_pdf_mode_for_subject(sub)
+                    ppdf = generate_simple_pdf(cont, f"مذكرة: {les}", f"{sub} | {gr}", rtl=rtl)
                     st.download_button("📄 PDF", ppdf, f"مذكرة_{les}.pdf",
                                        "application/pdf", key=f"ppdf_{pid}")
     with arch_tabs[2]:
@@ -2856,7 +2500,7 @@ with tab_archive:
             st.dataframe(df_c[["الاسم", "المادة", "العلامة", "من", "التاريخ"]],
                          use_container_width=True)
 
-# ========== TAB 8 — Statistics (unchanged) ==========
+# ========== TAB 8 — Statistics ==========
 with tab_stats:
     total_ex, plans_cnt, exams_cnt, corr_cnt = get_stats()
     st.markdown("### 📉 إحصائيات الاستخدام")
@@ -2917,7 +2561,7 @@ with tab_stats:
         else:
             st.markdown('<div class="error-box">❌ Arcee: غير متصل</div>', unsafe_allow_html=True)
 
-# ========== FOOTER (v4.0) ==========
+# ========== FOOTER ==========
 st.markdown(
     f"""
 <div class="donia-ip-footer">
@@ -2926,16 +2570,16 @@ st.markdown(
   </div>
   <div class="donia-footer-social">
     <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer">
-      📱 واتساب
+      \U0001F4F1 واتساب
     </a>
     <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer">
-      📘 فيسبوك
+      \U0001F4D6 فيسبوك
     </a>
     <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer">
       ✈️ تيليغرام
     </a>
     <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer">
-      💼 لينكدإن
+      \U0001F4BC لينكدإن
     </a>
   </div>
   <div style="margin-top:.4rem;font-size:.78rem;color:#888">
