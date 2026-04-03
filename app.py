@@ -2598,11 +2598,7 @@ st.markdown(
   <div style="margin-top:.4rem;font-size:.78rem;color:#888">
     DONIA LABS TECH — منصة المعلم الجزائري الذكي | v4.0 (Dual‑Intelligence Edition)
   </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-# ======================== PATCH v4.1 (FIXES) ========================
+</div># ======================== PATCH v4.1 (FIXES) ========================
 # Overrides for missing buttons, Arcee workspace, and PDF Unicode support
 # Append this entire block to the end of your app.py file.
 
@@ -2764,3 +2760,7 @@ if not _DOCX_AVAILABLE:
 print("[PATCH] All fixes applied: PDF Unicode, Arcee workspace, DOCX/PDF buttons restored.")
 
 # End of patch
+
+""",
+    unsafe_allow_html=True,
+)
