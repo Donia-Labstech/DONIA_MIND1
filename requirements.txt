@@ -1,99 +1,46 @@
-# ═══════════════════════════════════════════════════════════
-
-# DONIA MIND V4.0 - OFFICIAL REQUIREMENTS (DUAL-AI EDITION)
-
-# ═══════════════════════════════════════════════════════════
-
-
-
-# الأساسيات وواجهة المستخدم (Core Framework)
-
-streamlit>=1.32.0
-
+# الأساسيات (تم تثبيت الإصدار الذي كان يعمل لديك)
+streamlit>=1.28.0
 python-dotenv>=1.0.0
-
 requests>=2.31.0
 
-
-
-# الذكاء الاصطناعي والبحث الذكي (AI & Search RAG)
-
+# الذكاء الاصطناعي (تم دمج الإصدارات المتوافقة)
+langchain-groq>=0.1.0
 groq>=0.4.0
-
 openai>=1.0.0
+tavily-python>=0.3.0
+arcee-python>=0.1.0
 
-langchain-groq>=0.1.3
+# الوسائط والتفاعل
+streamlit-mic-recorder>=0.1.0
+streamlit-drawable-canvas
 
-tavily-python             # للبحث عن الصور والمحتوى المباشر من الإنترنت
-
-
-
-# أدوات الوسائط المتعددة والرسم (Multimedia & Interactive Tools)
-
-streamlit-mic-recorder    # لتفعيل الميكروفون (تحويل الصوت لنص)
-
-streamlit-drawable-canvas    # لأداة رسم المنحنيات والأشكال الهندسية
-
-
-
-# معالجة اللغات والتعرف التلقائي (NLP & Detection)
-
-langdetect                # للتعرف التلقائي على لغة المعلم (عربي/فرنسي/إنجليزي)
-
+# معالجة اللغات (ضرورية للعربية)
 arabic-reshaper>=3.0.0
-
 python-bidi>=0.4.2
+langdetect>=1.0.9
 
-
-
-# معالجة البيانات والرسوم البيانية (Data & Analytics)
-
+# البيانات والرسوم
 pandas>=2.0.0
-
-openpyxl>=3.1.2
-
+openpyxl>=3.1.0
 xlsxwriter>=3.1.0
-
 xlrd>=2.0.1
+plotly>=5.17.0
 
-plotly>=5.18.0
-
-
-
-# معالجة الصور و الـ OCR ورموز الاستجابة (Vision)
-
+# الصور و OCR
 Pillow>=10.0.0
-
 pytesseract>=0.3.10
+qrcode[pil]>=7.4.0
 
-qrcode[pil]>=7.4.2
-
-
-
-# توليد المستندات والـ PDF (Document Engineering)
-
-fpdf2                     # المحرك الأساسي لدعم الخطوط العربية (منع المربعات)
-
-reportlab>=4.0.0          # الحفاظ على التوافق مع التقارير القديمة
-
-python-docx>=1.1.0
-
+# المستندات و PDF
+fpdf2>=2.7.0
+reportlab>=4.0.0
+python-docx>=0.8.11
+pdfplumber>=0.10.0
+PyPDF2>=3.0.0
 lxml>=4.9.0
 
-pdfplumber>=0.10.0
-
-PyPDF2>=3.0.0
-
-
-
-# قواعد البيانات والربط السحابي (Cloud Backend)
-
+# الخدمات السحابية
 firebase-admin>=6.2.0
-
 google-api-python-client>=2.100.0
-
 google-auth-httplib2>=0.1.0
-
 google-auth-oauthlib>=1.0.0
-
-قال Gemini
