@@ -1460,19 +1460,33 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-    )
-
-model_name = DEFAULT_GROQ_MODEL
-
-# ========== HEADER (v4.0) ==========
-st.markdown("""
-<div class="donia-slogan-bar">
-  <span class="donia-slogan-ar">بالعلم نرتقي</span>
-  <div class="donia-slogan-divider"></div>
-  <span class="donia-slogan-en">Education Uplifts Us</span>
+ st.markdown(
+    f"""
+<div class="donia-ip-footer">
+  <div style="margin-bottom:.5rem;font-size:1rem">
+    {COPYRIGHT_FOOTER_AR}
+  </div>
+  <div class="donia-footer-social">
+    <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer">
+      \U0001F4F1 واتساب
+    </a>
+    <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer">
+      \U0001F4D6 فيسبوك
+    </a>
+    <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer">
+      ✈️ تيليغرام
+    </a>
+    <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer">
+      \U0001F4BC لينكدإن
+    </a>
+  </div>
+  <div style="margin-top:.4rem;font-size:.78rem;color:#888">
+    DONIA LABS TECH — منصة المعلم الجزائري الذكي | v4.0 (Dual‑Intelligence Edition)
+  </div>
 </div>
-""", unsafe_allow_html=True)
-
+""",
+    unsafe_allow_html=True,
+)
 st.markdown(f"""
 <div class="title-card">
     <h1 style="color:#ffffff!important;font-family:'Cairo',sans-serif">🎓 DONIA MIND — المعلم الذكي v4.0</h1>
