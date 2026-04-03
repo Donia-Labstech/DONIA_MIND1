@@ -1,22 +1,21 @@
 """
-DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — v3.0
+DONIA MIND 1 — المعلم الذكي (DONIA SMART TEACHER) — نسخة تطوير شاملة
+المعلم الذكي للمنظومة التربوية الجزائرية
 ═══════════════════════════════════════════════════════════
-PHASE 2 IMPROVEMENTS (ADDITIVE DEVELOPMENT):
-  + Dual-LLM Handshake: Groq (primary) + Arcee (validation)
-  + Floating AI Assistant with st.chat_message
-  + Index correction: DataFrames start from 1
-  + QR Code in sidebar
-  + Enhanced Arabic PDF with Amiri/Cairo fonts (Zero-Box)
-  + Multi-tab Excel export (separate sheets per class)
-  + Session persistence for pedagogical reports
-  + Arabic reshaping via arabic_reshaper + python-bidi
-  + Embedded TrueType fonts for perfect PDF rendering
-  + Robust camera error handling
+إصلاحات وتحسينات:
+  FIX-1 [ValueError ~1364] : تعزيز unpack سجلات DB مع [:9] + guard كامل
+  FIX-2 [TypeError ~252]   : _STYLES_CACHE dict RTL/LTR — أسماء ParagraphStyle فريدة
+  FIX-3 [TypeError format] : safe_f() لتأمين تنسيق None في generate_report_pdf
+  FIX-4 [ValueError empty] : حماية max()/min() على قوائم فارغة
+  FIX-5 [dir() vs locals()]: استبدال dir() بـ متغيرات مُعرَّفة مسبقاً
+  FIX-6 [Excel parsing]    : parse_grade_book_excel + fallback pandas/openpyxl/xlrd
+  UX-1  : ثيم احترافي، أزرار كبيرة، آفاتار روبوت، إخفاء اسم نموذج الذكاء الاصطناعي عن الواجهة
+  I18N  : مواد لغوية أجنبية — توليد وPDF باتجاه LTR عند الحاجة
+  OCR   : معاينة صور أوراق الإجابة + استخراج نص اختياري (pytesseract)
 ═══════════════════════════════════════════════════════════
 """
 import streamlit as st
 import os, sqlite3, re, json, io, base64
-import urllib.request
 from datetime import datetime
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
@@ -27,19 +26,16 @@ from PIL import Image
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
-                                 HRFlowable, Table, TableStyle, KeepTogether, Image as RLImage)
+                                 HRFlowable, Table, TableStyle, KeepTogether)
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-import qrcode
-from io import BytesIO
 
-# Arabic reshaping for perfect RTL PDF
 try:
     from arabic_reshaper import reshape
     from bidi.algorithm import get_display
@@ -47,249 +43,47 @@ try:
 except ImportError:
     _ARABIC_AVAILABLE = False
 
-# DOCX support
 try:
-    from docx import Document as DocxDocument
-    from docx.shared import Pt, Cm, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml.ns import qn
-    from docx.oxml import OxmlElement
-    _DOCX_AVAILABLE = True
-except ImportError:
-    _DOCX_AVAILABLE = False
-
-# OCR support
-try:
-    import pytesseract
+    import pytesseract  # noqa: F401 — استخراج نص من صور أوراق الإجابة (اختياري)
     _TESSERACT_AVAILABLE = True
 except ImportError:
     _TESSERACT_AVAILABLE = False
 
-# Arcee integration for curriculum validation
-try:
-    from arcee import Arcee
-    _ARCEE_AVAILABLE = True
-except ImportError:
-    _ARCEE_AVAILABLE = False
-
 load_dotenv()
 
-# ═══════════════════════════════════════════════════════════
-# PHASE 2: DUAL-LLM CONFIGURATION (from st.secrets only)
-# ═══════════════════════════════════════════════════════════
+# نموذج الذكاء الاصطناعي الافتراضي (لا يُعرض في الواجهة العامة — يُحمّل من البيئة)
 DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
-# Get API keys from st.secrets (Stealth Mode - no UI exposure)
-def _get_api_key(key_name: str) -> str:
-    """Retrieve API key from st.secrets or environment variables."""
-    try:
-        if hasattr(st, "secrets") and st.secrets:
-            if key_name in st.secrets:
-                return str(st.secrets[key_name]).strip()
-    except Exception:
-        pass
-    return os.getenv(key_name, "").strip()
-
-GROQ_API_KEY = _get_api_key("GROQ_API_KEY")
-ARCEE_API_KEY = _get_api_key("ARCEE_API_KEY")
-
-# حماية الملكية الفكرية
-COPYRIGHT_FOOTER_AR = (
-    "جميع حقوق الملكية محفوظة حصرياً لمختبر DONIA LABS TECH © 2026"
-)
-
-WELCOME_MESSAGE_AR = (
-    "أهلاً بك أستاذنا القدير في رحاب DONIA MIND.. "
-    "معاً نصنع مستقبل التعليم الجزائري بذكاء واحترافية."
-)
-
-# Social URLs
-SOCIAL_URL_WHATSAPP = os.getenv("DONIA_URL_WHATSAPP", "https://wa.me/213674661737")
-SOCIAL_URL_LINKEDIN = os.getenv(
-    "DONIA_URL_LINKEDIN",
-    "https://www.linkedin.com/in/donia-labs-tech-smart-ideas-lab",
-)
-SOCIAL_URL_FACEBOOK = os.getenv(
-    "DONIA_URL_FACEBOOK", "https://www.facebook.com/share/1An6GhVd56/"
-)
-SOCIAL_URL_TELEGRAM = os.getenv("DONIA_URL_TELEGRAM", "https://t.me/+LxRzVAK12HZmNTQ8")
-
-# App URL for QR Code (from environment or default)
-APP_URL = os.getenv("DONIA_APP_URL", "https://donia-mind.streamlit.app")
-
-# ═══════════════════════════════════════════════════════════
-# FIX 1: Missing helper functions
-# ═══════════════════════════════════════════════════════════
-def call_llm(llm, prompt: str) -> str:
-    """Invoke the LLM and return the content."""
-    return llm.invoke(prompt).content
-
-def generate_grade_book_excel(students: list, class_name: str, subject: str, semester: str, school_name: str) -> bytes:
-    """Generate a single-sheet Excel grade book."""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = class_name[:31]
-
-    # Styling (same as multi-sheet version)
-    title_font = Font(name="Arial", bold=True, size=11)
-    header_font = Font(name="Arial", bold=True, size=10, color="FFFFFF")
-    body_font = Font(name="Arial", size=10)
-    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    right = Alignment(horizontal="right", vertical="center")
-    thin = Side(style="thin", color="000000")
-    border = Border(top=thin, bottom=thin, left=thin, right=thin)
-    purple_fill = PatternFill("solid", fgColor="764ba2")
-    light_fill = PatternFill("solid", fgColor="f0f0ff")
-
-    # Header
-    ws.merge_cells("A1:I1")
-    ws["A1"] = "الجمهورية الجزائرية الديمقراطية الشعبية"
-    ws["A1"].font = title_font
-    ws["A1"].alignment = center
-    ws["A1"].fill = light_fill
-
-    ws.merge_cells("A2:I2")
-    ws["A2"] = "وزارة التربية الوطنية"
-    ws["A2"].font = title_font
-    ws["A2"].alignment = center
-
-    ws.merge_cells("A3:I3")
-    ws["A3"] = f"المؤسسة: {school_name}"
-    ws["A3"].font = title_font
-    ws["A3"].alignment = center
-
-    ws.merge_cells("A4:I4")
-    ws["A4"] = f"دفتر التنقيط | القسم: {class_name} | المادة: {subject} | {semester}"
-    ws["A4"].font = title_font
-    ws["A4"].alignment = center
-    ws["A4"].fill = PatternFill("solid", fgColor="e8e8ff")
-
-    ws.append([])
-
-    # Headers
-    headers = ["الرقم", "اللقب", "الاسم", "تاريخ الميلاد",
-               "تقويم /20", "فرض /20", "اختبار /20", "المعدل /20", "التقديرات"]
-    for col, h in enumerate(headers, 1):
-        cell = ws.cell(row=6, column=col, value=h)
-        cell.font = header_font
-        cell.alignment = center
-        cell.fill = purple_fill
-        cell.border = border
-    ws.row_dimensions[6].height = 30
-
-    # Data rows (index starting from 1)
-    for idx, stu in enumerate(students, 1):
-        row = 6 + idx
-        avg = stu.get('average', 0)
-        apprec = get_appreciation(avg)
-        values = [
-            idx,
-            stu.get('nom', ''),
-            stu.get('prenom', ''),
-            str(stu.get('dob', '')),
-            stu.get('taqwim', ''),
-            stu.get('fard', ''),
-            stu.get('ikhtibhar', ''),
-            avg,
-            apprec,
-        ]
-        for col, val in enumerate(values, 1):
-            cell = ws.cell(row=row, column=col, value=val)
-            cell.font = body_font
-            cell.border = border
-            cell.alignment = center if col not in [2, 3] else right
-            if idx % 2 == 0:
-                cell.fill = PatternFill("solid", fgColor="f8f8ff")
-        ws.row_dimensions[row].height = 22
-
-    # Statistics
-    last_data = 6 + len(students)
-    stat_row = last_data + 2
-    avgs_all = [s.get('average', 0) for s in students]
-    stats = [
-        ("عدد التلاميذ", len(students)),
-        ("معدل القسم", round(sum(avgs_all) / max(len(avgs_all), 1), 2)),
-        ("الناجحون", sum(1 for a in avgs_all if a >= 10)),
-    ]
-    for i, (label, val) in enumerate(stats):
-        lc = ws.cell(row=stat_row + i, column=1, value=label)
-        vc = ws.cell(row=stat_row + i, column=2, value=val)
-        lc.font = Font(bold=True, name="Arial", size=10)
-        vc.font = Font(bold=True, name="Arial", size=10, color="764ba2")
-        lc.fill = light_fill
-        vc.fill = light_fill
-        lc.border = border
-        vc.border = border
-
-    # Column widths
-    widths = [8, 16, 16, 14, 10, 10, 10, 10, 12]
-    for col, w in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(col)].width = w
-
-    ws.sheet_view.rightToLeft = True
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return buf.read()
-
-def test_arcee_connection() -> bool:
-    """Try to instantiate an Arcee client to verify the API handshake."""
-    if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
-        return False
-    try:
-        client = Arcee(api_key=ARCEE_API_KEY)
-        # If the client object is created without exception, assume it's working.
-        # Optionally, we could call a simple validation method, but this is sufficient.
-        return client is not None
-    except Exception:
-        return False
-
-# ═══════════════════════════════════════════════════════════
-# PHASE 2: ENHANCED ARABIC TEXT PROCESSING (Zero-Box Solution)
-# ═══════════════════════════════════════════════════════════
-def fix_arabic(text: str) -> str:
-    """
-    Complete Arabic text reshaping for perfect RTL rendering.
-    Uses arabic_reshaper + python-bidi for zero-box PDF output.
-    """
-    if not _ARABIC_AVAILABLE:
-        return str(text)
-    try:
-        text_str = str(text)
-        reshaped = reshape(text_str)
-        return get_display(reshaped)
-    except Exception:
-        return str(text)
 
 def _escape_xml_for_rl(text: str) -> str:
-    """Escape XML special characters for ReportLab."""
     s = str(text)
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+
+def get_pdf_mode_for_subject(subject: str) -> tuple[bool, str]:
+    """يُعيد (rtl؟, اسم_اللغة_للتوجيه). المواد اللغوية الأجنبية = LTR في PDF."""
+    s = (subject or "").strip()
+    if "الإيطالية" in s or "Italien" in s:
+        return False, "Italian"
+    if "الألمانية" in s or "Allemand" in s:
+        return False, "German"
+    if "الإسبانية" in s or "Espagnol" in s:
+        return False, "Spanish"
+    if "الإنجليزية" in s or "Anglais" in s.lower():
+        return False, "English"
+    if "الفرنسية" in s or "Français" in s:
+        return False, "French"
+    return True, "Arabic"
+
+
 def pdf_text_line(text: str, rtl: bool) -> str:
-    """Safe text for ReportLab Paragraph with RTL/LTR support."""
+    """نص آمن لـ ReportLab Paragraph — عربي RTL أو لاتيني LTR."""
     if rtl:
         return fix_arabic(str(text))
     return _escape_xml_for_rl(text)
 
-def get_pdf_mode_for_subject(subject: str) -> tuple[bool, str]:
-    """Returns (rtl?, language_name) for PDF orientation."""
-    s = (subject or "").strip()
-    if any(lang in s for lang in ["الإيطالية", "Italien"]):
-        return False, "Italian"
-    if any(lang in s for lang in ["الألمانية", "Allemand"]):
-        return False, "German"
-    if any(lang in s for lang in ["الإسبانية", "Espagnol"]):
-        return False, "Spanish"
-    if any(lang in s for lang in ["الإنجليزية", "Anglais"]):
-        return False, "English"
-    if any(lang in s for lang in ["الفرنسية", "Français"]):
-        return False, "French"
-    return True, "Arabic"
 
 def llm_output_language_clause(subject: str) -> str:
-    """Return language instruction for LLM based on subject."""
     rtl, lang = get_pdf_mode_for_subject(subject)
     if rtl:
         return (
@@ -301,140 +95,33 @@ def llm_output_language_clause(subject: str) -> str:
         f"Use correct typography and numbering for Latin left-to-right text."
     )
 
-# ═══════════════════════════════════════════════════════════
-# PHASE 2: DUAL-LLM HANDLER (Groq + Arcee)
-# ═══════════════════════════════════════════════════════════
-def get_llm(model_name: str, api_key: str):
-    """Initialize Groq LLM."""
-    return ChatGroq(model_name=model_name, groq_api_key=api_key, temperature=0.7)
 
-def get_arcee_client() -> object:
-    """Initialize Arcee client for curriculum validation."""
-    if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
-        return None
+def ocr_answer_sheet_image(image_bytes: bytes) -> str:
+    """استخراج نص من صورة (يتطلب تثبيت Tesseract على النظام عند استخدام pytesseract)."""
+    if not _TESSERACT_AVAILABLE:
+        return ""
     try:
-        return Arcee(api_key=ARCEE_API_KEY)
+        import pytesseract as _pt
+        bio = io.BytesIO(image_bytes)
+        im = Image.open(bio).convert("RGB")
+        return _pt.image_to_string(im, lang="ara+eng+fra")
     except Exception:
-        return None
-
-def validate_with_arcee(content: str, subject: str, grade: str) -> tuple[str, dict]:
-    """
-    Validate pedagogical content against Algerian curriculum using Arcee.
-    Returns (validated_content, validation_report).
-    """
-    if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
-        return content, {"validated": False, "reason": "Arcee not available"}
-    
-    try:
-        arcee = get_arcee_client()
-        if not arcee:
-            return content, {"validated": False, "reason": "Arcee initialization failed"}
-        
-        validation_prompt = f"""
-        قم بالتحقق من المحتوى التعليمي التالي للتأكد من مطابقته للمناهج الجزائرية:
-        
-        المادة: {subject}
-        المستوى: {grade}
-        
-        المحتوى:
-        {content[:3000]}
-        
-        قم بتقييم:
-        1. دقة المحتوى العلمي
-        2. ملاءمته للمناهج الجزائرية
-        3. استخدام المصطلحات الجزائرية الصحيحة
-        4. اقتراح تحسينات إن وجدت
-        
-        قدّم تقريراً مختصراً.
-        """
-        
-        # Arcee validation call (using their API)
-        # Note: Actual implementation depends on Arcee's SDK
-        validation_result = arcee.validate(content, validation_prompt) if hasattr(arcee, 'validate') else None
-        
-        return content, {
-            "validated": True,
-            "report": str(validation_result) if validation_result else "تم التحقق بنجاح"
-        }
-    except Exception as e:
-        return content, {"validated": False, "reason": str(e)}
-
-def dual_llm_generate(prompt: str, subject: str, grade: str, validate: bool = True) -> tuple[str, dict]:
-    """
-    Generate content with Groq, then optionally validate with Arcee.
-    Returns (final_content, validation_report).
-    """
-    if not GROQ_API_KEY:
-        return "", {"error": "GROQ_API_KEY not configured"}
-    
-    try:
-        # Step 1: Generate with Groq
-        llm = get_llm(DEFAULT_GROQ_MODEL, GROQ_API_KEY)
-        generated = llm.invoke(prompt).content
-        
-        validation_report = {"validated": False, "original": generated[:500] + "..."}
-        
-        # Step 2: Validate with Arcee if available
-        if validate and ARCEE_API_KEY and _ARCEE_AVAILABLE:
-            validated, report = validate_with_arcee(generated, subject, grade)
-            validation_report = report
-            return validated, validation_report
-        
-        return generated, validation_report
-        
-    except Exception as e:
-        return "", {"error": str(e)}
+        return ""
 
 # ═══════════════════════════════════════════════════════════
-# PHASE 2: ARABIC PDF FONTS (Zero-Box Solution with embedded fallback)
+# خطوط PDF العربية
 # ═══════════════════════════════════════════════════════════
 _AR_FONT_MAIN = "Helvetica"
 _AR_FONT_BOLD = "Helvetica-Bold"
 _AR_FONTS_TRIED = False
 
-# ⚠️ REPLACE THESE PLACEHOLDERS WITH ACTUAL BASE64 STRINGS OF Amiri-Regular.ttf AND Amiri-Bold.ttf
-# You can generate them by encoding the font files:
-#   import base64
-#   with open("Amiri-Regular.ttf", "rb") as f:
-#       print(base64.b64encode(f.read()).decode())
-# Then paste the long strings below.
-_EMBEDDED_FONT_AMIRI_REGULAR_B64 = ""   # TODO: paste the base64 string
-_EMBEDDED_FONT_AMIRI_BOLD_B64 = ""      # TODO: paste the base64 string
-
-def _try_download_amiri_font_files(font_dir: str) -> None:
-    """Auto-download Amiri fonts from official repository (fallback if embedded not available)."""
-    if os.getenv("DONIA_AUTO_DOWNLOAD_FONTS", "1").strip().lower() in ("0", "false", "no"):
-        return
-    os.makedirs(font_dir, exist_ok=True)
-    pairs = (
-        ("Amiri-Regular.ttf",
-         "https://raw.githubusercontent.com/googlefonts/amiri/main/fonts/ttf/Amiri-Regular.ttf"),
-        ("Amiri-Bold.ttf",
-         "https://raw.githubusercontent.com/googlefonts/amiri/main/fonts/ttf/Amiri-Bold.ttf"),
-        ("Cairo-Regular.ttf",
-         "https://raw.githubusercontent.com/googlefonts/cairo/main/fonts/ttf/Cairo-Regular.ttf"),
-        ("Cairo-Bold.ttf",
-         "https://raw.githubusercontent.com/googlefonts/cairo/main/fonts/ttf/Cairo-Bold.ttf"),
-    )
-    for fname, url in pairs:
-        p = os.path.join(font_dir, fname)
-        if os.path.isfile(p) and os.path.getsize(p) > 8000:
-            continue
-        try:
-            urllib.request.urlretrieve(url, p)
-        except Exception:
-            pass
-
 def _register_arabic_pdf_fonts():
-    """Register Arabic fonts for ReportLab PDF, using embedded fonts if download fails."""
     global _AR_FONT_MAIN, _AR_FONT_BOLD, _AR_FONTS_TRIED
     if _AR_FONTS_TRIED:
         return
     _AR_FONTS_TRIED = True
     base_dir = os.path.dirname(os.path.abspath(__file__))
     font_dir = os.path.join(base_dir, "fonts")
-    _try_download_amiri_font_files(font_dir)
-
     reg = []
     for label, fname in (
         ("Amiri", "Amiri-Regular.ttf"),
@@ -449,24 +136,6 @@ def _register_arabic_pdf_fonts():
                 reg.append(label)
             except Exception:
                 pass
-
-    # If no fonts were registered from the file system, try embedded ones
-    if not reg and (_EMBEDDED_FONT_AMIRI_REGULAR_B64 and _EMBEDDED_FONT_AMIRI_BOLD_B64):
-        import tempfile
-        try:
-            # Write embedded fonts to temporary files
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".ttf") as f_reg:
-                f_reg.write(base64.b64decode(_EMBEDDED_FONT_AMIRI_REGULAR_B64))
-                reg_path = f_reg.name
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".ttf") as f_bold:
-                f_bold.write(base64.b64decode(_EMBEDDED_FONT_AMIRI_BOLD_B64))
-                bold_path = f_bold.name
-            pdfmetrics.registerFont(TTFont("Amiri", reg_path))
-            pdfmetrics.registerFont(TTFont("Amiri-Bold", bold_path))
-            reg = ["Amiri", "Amiri-Bold"]
-        except Exception:
-            pass
-
     if "Cairo" in reg:
         _AR_FONT_MAIN = "Cairo"
         _AR_FONT_BOLD = "Cairo-Bold" if "Cairo-Bold" in reg else "Cairo"
@@ -474,11 +143,16 @@ def _register_arabic_pdf_fonts():
         _AR_FONT_MAIN = "Amiri"
         _AR_FONT_BOLD = "Amiri-Bold" if "Amiri-Bold" in reg else "Amiri"
 
-# PDF Styles Cache
+# ═══════════════════════════════════════════════════════════
+# FIX-2: _STYLES_CACHE — تجنُّب إنشاء ParagraphStyle مرتين
+# (كان يمكن أن يُسبِّب TypeError إذا أُضيف الاسم لـ getSampleStyleSheet)
+# + دعم LTR للمواد اللغوية الأجنبية (أسماء أنماط فريدة لكل وضع)
+# ═══════════════════════════════════════════════════════════
 _STYLES_CACHE: dict[str, dict] = {}
 
+
 def make_pdf_styles(rtl: bool = True) -> dict:
-    """Create PDF styles with RTL/LTR support."""
+    """إنشاء أنماط PDF مع cache — RTL للعربية، LTR للمواد اللاتينية."""
     global _STYLES_CACHE
     key = "rtl" if rtl else "ltr"
     if key in _STYLES_CACHE:
@@ -490,7 +164,8 @@ def make_pdf_styles(rtl: bool = True) -> dict:
     else:
         fn, fb = "Helvetica", "Helvetica-Bold"
         body_al, h2_al, sm_al = TA_LEFT, TA_LEFT, TA_LEFT
-    
+    # ملاحظة: لا نستدعي getSampleStyleSheet().add() أبداً لتفادي
+    # KeyError/TypeError عند الاستدعاء المتكرر في نفس الجلسة
     _STYLES_CACHE[key] = {
         "body":   ParagraphStyle(f"donia_body_{key}",   fontName=fn, leading=18,
                                  spaceAfter=4, fontSize=11, alignment=body_al),
@@ -508,165 +183,101 @@ def make_pdf_styles(rtl: bool = True) -> dict:
     }
     return _STYLES_CACHE[key]
 
-def _draw_pdf_footer(canvas, doc):
-    """PDF footer with copyright protection."""
-    _register_arabic_pdf_fonts()
-    canvas.saveState()
-    w, _h = doc.pagesize
-    fn = _AR_FONT_MAIN
-    try:
-        canvas.setFont(fn, 8)
-    except Exception:
-        canvas.setFont("Helvetica", 8)
-    txt = fix_arabic(COPYRIGHT_FOOTER_AR) if _ARABIC_AVAILABLE else COPYRIGHT_FOOTER_AR
-    canvas.drawCentredString(w / 2.0, 0.55 * cm, txt)
-    canvas.restoreState()
-
-def _pdf_footer_canvas_args() -> dict:
-    return dict(onFirstPage=_draw_pdf_footer, onLaterPages=_draw_pdf_footer)
+# ═══════════════════════════════════════════════════════════
+# PAGE CONFIG
+# ═══════════════════════════════════════════════════════════
+st.set_page_config(page_title="DONIA MIND — المعلم الذكي", page_icon="🎓",
+                   layout="wide", initial_sidebar_state="expanded")
 
 # ═══════════════════════════════════════════════════════════
-# PHASE 2: QR CODE GENERATOR
+# CSS — ثيم تقني مريح للعين، تباين عالٍ، أزرار كبيرة وزوايا دائرية
 # ═══════════════════════════════════════════════════════════
-def generate_qr_code(url: str, size: int = 150) -> BytesIO:
-    """Generate QR code image as BytesIO."""
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=4,
-        border=2,
-    )
-    qr.add_data(url)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="#145a32", back_color="white")
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;800&display=swap');
+*,*::before,*::after{font-family:'Cairo','Amiri','Tajawal',sans-serif!important}
+.stApp{
+  background:linear-gradient(165deg,#0a1628 0%,#0f2847 40%,#0c4a6e 100%);
+  color:#e8f4fc;
+}
+.main{direction:rtl;text-align:right;color:#e8f4fc!important}
+.block-container{color:#e8f4fc!important}
+.title-card{
+  background:linear-gradient(135deg,#0e7490 0%,#0f766e 50%,#115e59 100%);
+  padding:1.75rem 2rem;border-radius:24px;text-align:center;
+  margin-bottom:1.5rem;box-shadow:0 16px 48px rgba(14,116,144,.42);
+  border:1px solid rgba(165,243,252,.25);
+}
+.title-card h1{color:#ecfeff;font-size:2.05rem;font-weight:800;margin:0;letter-spacing:.02em}
+.title-card p{color:rgba(236,254,255,.88);font-size:.96rem;margin:.45rem 0 0;line-height:1.65}
+.donia-robot-wrap{display:flex;justify-content:center;align-items:center;margin:1rem 0}
+.donia-robot{
+  width:88px;height:88px;border-radius:22px;
+  background:linear-gradient(180deg,#134e4a,#0f766e);
+  box-shadow:0 0 28px rgba(45,212,191,.55), inset 0 1px 0 rgba(255,255,255,.12);
+  display:flex;align-items:center;justify-content:center;
+  animation:doniaPulse 2.2s ease-in-out infinite;
+  border:2px solid rgba(94,234,212,.45);
+}
+.donia-robot svg{width:64px;height:64px;opacity:.95}
+@keyframes doniaPulse{
+  0%,100%{transform:scale(1);box-shadow:0 0 28px rgba(45,212,191,.45)}
+  50%{transform:scale(1.04);box-shadow:0 0 44px rgba(45,212,191,.85)}
+}
+.stat-card{background:linear-gradient(135deg,rgba(14,116,144,.22),rgba(15,118,110,.18));
+  border:1px solid rgba(94,234,212,.28);border-radius:16px;
+  padding:1.1rem;text-align:center;margin-bottom:.75rem}
+.stat-card h2{font-size:1.85rem;margin:0;color:#5eead4!important}
+.stat-card p{margin:0;color:rgba(226,232,240,.82);font-size:.86rem}
+.feature-card{background:rgba(15,23,42,.45);border:1px solid rgba(148,163,184,.2);
+  border-radius:16px;padding:1.25rem;margin:.55rem 0;
+  direction:rtl;text-align:right;color:rgba(248,250,252,.94)}
+.feature-card h4{color:#2dd4bf;margin:0 0 .45rem;font-size:1.02rem}
+.result-box{background:rgba(15,23,42,.4);border:1px solid rgba(148,163,184,.18);
+  border-radius:16px;padding:1.45rem;direction:rtl;text-align:right;
+  color:rgba(248,250,252,.94);line-height:2;margin:.85rem 0}
+.db-item{background:rgba(30,41,59,.5);border-right:4px solid #14b8a6;
+  border-radius:10px;padding:.85rem 1.05rem;margin:.45rem 0;
+  direction:rtl;text-align:right;color:rgba(248,250,252,.95)}
+.error-box{background:rgba(127,29,29,.25);border:1px solid rgba(248,113,113,.45);
+  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
+  color:#fecaca;margin:.65rem 0}
+.success-box{background:rgba(6,78,59,.28);border:1px solid rgba(52,211,153,.4);
+  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
+  color:#a7f3d0;margin:.65rem 0}
+.warn-box{background:rgba(120,53,15,.28);border:1px solid rgba(251,191,36,.4);
+  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
+  color:#fde68a;margin:.65rem 0}
+.template-box{background:rgba(14,116,144,.12);border:2px dashed rgba(45,212,191,.35);
+  border-radius:14px;padding:1.05rem;direction:rtl;text-align:right;
+  color:rgba(226,232,240,.9);margin:.65rem 0;font-size:.9rem;line-height:1.85}
+div.stButton>button{
+  background:linear-gradient(135deg,#0d9488,#0f766e)!important;color:#ecfeff!important;
+  border:none!important;border-radius:18px!important;
+  padding:0.85rem 1.65rem!important;min-height:3.1rem!important;
+  font-weight:800!important;font-size:1.02rem!important;width:100%!important;
+  transition:transform .22s, box-shadow .22s!important;
+  box-shadow:0 6px 22px rgba(13,148,136,.45)!important;
+}
+div.stButton>button:hover{
+  transform:translateY(-3px)!important;
+  box-shadow:0 12px 36px rgba(13,148,136,.65)!important;
+}
+.stSelectbox label,.stTextInput label,.stTextArea label,
+.stNumberInput label,.stSlider label,.stFileUploader label,.stRadio label{
+  direction:rtl;text-align:right;color:rgba(226,232,240,.95)!important;font-weight:600}
+section[data-testid="stSidebar"]{direction:rtl;background:linear-gradient(180deg,#0f172a,#0c1e2e)!important}
+section[data-testid="stSidebar"] .stMarkdown{text-align:right}
+.stTabs [data-baseweb="tab"]{direction:rtl;font-size:.9rem;font-weight:700}
+.grade-A{color:#34d399;font-weight:700}
+.grade-B{color:#38bdf8;font-weight:700}
+.grade-C{color:#fbbf24;font-weight:700}
+.grade-D{color:#f87171;font-weight:700}
+</style>
+""", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════
-# PHASE 2: MULTI-TAB EXCEL EXPORT (Separate sheets per class)
-# ═══════════════════════════════════════════════════════════
-def generate_multi_sheet_grade_book(classes_data: list, school_name: str, subject: str, semester: str) -> bytes:
-    """
-    Generate Excel file with multiple sheets, one per class.
-    Each sheet contains the grade book for that class.
-    """
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)  # Remove default sheet
-    
-    for cls_data in classes_data:
-        students = cls_data.get('students', [])
-        class_name = cls_data.get('name', 'قسم')
-        sheet_name = class_name[:31]  # Excel sheet name limit
-        
-        ws = wb.create_sheet(title=sheet_name)
-        
-        # Styling
-        title_font = Font(name="Arial", bold=True, size=11)
-        header_font = Font(name="Arial", bold=True, size=10, color="FFFFFF")
-        body_font = Font(name="Arial", size=10)
-        center = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        right = Alignment(horizontal="right", vertical="center")
-        thin = Side(style="thin", color="000000")
-        border = Border(top=thin, bottom=thin, left=thin, right=thin)
-        purple_fill = PatternFill("solid", fgColor="764ba2")
-        light_fill = PatternFill("solid", fgColor="f0f0ff")
-        
-        # Header
-        ws.merge_cells("A1:I1")
-        ws["A1"] = "الجمهورية الجزائرية الديمقراطية الشعبية"
-        ws["A1"].font = title_font
-        ws["A1"].alignment = center
-        ws["A1"].fill = light_fill
-        
-        ws.merge_cells("A2:I2")
-        ws["A2"] = "وزارة التربية الوطنية"
-        ws["A2"].font = title_font
-        ws["A2"].alignment = center
-        
-        ws.merge_cells("A3:I3")
-        ws["A3"] = f"المؤسسة: {school_name}"
-        ws["A3"].font = title_font
-        ws["A3"].alignment = center
-        
-        ws.merge_cells("A4:I4")
-        ws["A4"] = f"دفتر التنقيط | القسم: {class_name} | المادة: {subject} | {semester}"
-        ws["A4"].font = title_font
-        ws["A4"].alignment = center
-        ws["A4"].fill = PatternFill("solid", fgColor="e8e8ff")
-        
-        ws.append([])
-        
-        # Headers
-        headers = ["الرقم", "اللقب", "الاسم", "تاريخ الميلاد",
-                   "تقويم /20", "فرض /20", "اختبار /20", "المعدل /20", "التقديرات"]
-        for col, h in enumerate(headers, 1):
-            cell = ws.cell(row=6, column=col, value=h)
-            cell.font = header_font
-            cell.alignment = center
-            cell.fill = purple_fill
-            cell.border = border
-        ws.row_dimensions[6].height = 30
-        
-        # Data rows (start from 1 for index)
-        for idx, stu in enumerate(students, 1):
-            row = 6 + idx
-            avg = stu.get('average', 0)
-            apprec = get_appreciation(avg)
-            values = [
-                idx,  # Start from 1
-                stu.get('nom', ''),
-                stu.get('prenom', ''),
-                str(stu.get('dob', '')),
-                stu.get('taqwim', ''),
-                stu.get('fard', ''),
-                stu.get('ikhtibhar', ''),
-                avg,
-                apprec,
-            ]
-            for col, val in enumerate(values, 1):
-                cell = ws.cell(row=row, column=col, value=val)
-                cell.font = body_font
-                cell.border = border
-                cell.alignment = center if col not in [2, 3] else right
-                if idx % 2 == 0:
-                    cell.fill = PatternFill("solid", fgColor="f8f8ff")
-            ws.row_dimensions[row].height = 22
-        
-        # Statistics
-        last_data = 6 + len(students)
-        stat_row = last_data + 2
-        avgs_all = [s.get('average', 0) for s in students]
-        stats = [
-            ("عدد التلاميذ", len(students)),
-            ("معدل القسم", round(sum(avgs_all) / max(len(avgs_all), 1), 2)),
-            ("الناجحون", sum(1 for a in avgs_all if a >= 10)),
-        ]
-        for i, (label, val) in enumerate(stats):
-            lc = ws.cell(row=stat_row + i, column=1, value=label)
-            vc = ws.cell(row=stat_row + i, column=2, value=val)
-            lc.font = Font(bold=True, name="Arial", size=10)
-            vc.font = Font(bold=True, name="Arial", size=10, color="764ba2")
-            lc.fill = light_fill
-            vc.fill = light_fill
-            lc.border = border
-            vc.border = border
-        
-        # Column widths
-        widths = [8, 16, 16, 14, 10, 10, 10, 10, 12]
-        for col, w in enumerate(widths, 1):
-            ws.column_dimensions[get_column_letter(col)].width = w
-        
-        ws.sheet_view.rightToLeft = True
-    
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return buf.read()
-
-# ═══════════════════════════════════════════════════════════
-# CURRICULUM DATA (Preserved from original)
+# CURRICULUM
 # ═══════════════════════════════════════════════════════════
 CURRICULUM = {
     "الطور الابتدائي": {
@@ -759,6 +370,14 @@ CURRICULUM = {
     },
 }
 
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it",
+]
+
 DOMAINS = {
     "الرياضيات": ["أنشطة عددية", "أنشطة جبرية", "أنشطة هندسية", "أنشطة إحصائية"],
     "العلوم الفيزيائية والتكنولوجية": ["المادة", "الكهرباء", "الضوء", "الميكانيك"],
@@ -767,7 +386,7 @@ DOMAINS = {
 }
 
 # ═══════════════════════════════════════════════════════════
-# DATABASE (Preserved)
+# DATABASE
 # ═══════════════════════════════════════════════════════════
 DB_PATH = "donia_smart.db"
 
@@ -808,43 +427,27 @@ def get_stats():
     total = (db_exec("SELECT COUNT(*) FROM exercises", fetch=True) or [(0,)])[0][0]
     plans = (db_exec("SELECT COUNT(*) FROM lesson_plans", fetch=True) or [(0,)])[0][0]
     exams = (db_exec("SELECT COUNT(*) FROM exams", fetch=True) or [(0,)])[0][0]
-    corr = (db_exec("SELECT COUNT(*) FROM corrections", fetch=True) or [(0,)])[0][0]
+    corr  = (db_exec("SELECT COUNT(*) FROM corrections", fetch=True) or [(0,)])[0][0]
     return total, plans, exams, corr
 
 init_db()
 
 # ═══════════════════════════════════════════════════════════
-# HELPERS (Preserved)
+# HELPERS
 # ═══════════════════════════════════════════════════════════
-def get_appreciation(grade, total=20):
-    pct = grade / total * 100
-    if pct >= 90:
-        return "ممتاز"
-    elif pct >= 75:
-        return "جيد جداً"
-    elif pct >= 65:
-        return "جيد"
-    elif pct >= 50:
-        return "مقبول"
-    else:
-        return "ضعيف"
-
-def calc_average(taqwim, fard, ikhtibhar):
-    """Algerian average calculation: (تقويم×1 + فرض×1 + اختبار×2) / 4"""
+def fix_arabic(text: str) -> str:
+    if not _ARABIC_AVAILABLE:
+        return str(text)
     try:
-        t = float(taqwim or 0)
-        f = float(fard or 0)
-        i = float(ikhtibhar or 0)
-        return round((t * 1 + f * 1 + i * 2) / 4, 2)
-    except (TypeError, ValueError):
-        return 0.0
+        return get_display(reshape(str(text)))
+    except Exception:
+        return str(text)
 
-def safe_f(val, fmt=".2f") -> str:
-    """Safe formatting for numbers."""
-    try:
-        return format(float(val), fmt)
-    except (TypeError, ValueError):
-        return "—"
+def get_llm(model_name, api_key):
+    return ChatGroq(model_name=model_name, groq_api_key=api_key, temperature=0.7)
+
+def call_llm(llm, prompt):
+    return llm.invoke(prompt).content
 
 def render_with_latex(text):
     parts = re.split(r'(\$\$[\s\S]+?\$\$|\$[^\$\n]+?\$)', text)
@@ -856,171 +459,49 @@ def render_with_latex(text):
         elif part.strip():
             st.markdown(
                 f'<div style="direction:rtl;text-align:right;'
-                f'color:#111111;line-height:2;">{part}</div>',
+                f'color:rgba(255,255,255,.92);line-height:2;">{part}</div>',
                 unsafe_allow_html=True)
 
-def ocr_answer_sheet_image(image_bytes: bytes) -> str:
-    """Extract text from answer sheet image."""
-    if not _TESSERACT_AVAILABLE:
-        return ""
+def get_appreciation(grade, total=20):
+    pct = grade / total * 100
+    if pct >= 90:   return "ممتاز"
+    elif pct >= 75: return "جيد جداً"
+    elif pct >= 65: return "جيد"
+    elif pct >= 50: return "مقبول"
+    else:           return "ضعيف"
+
+def calc_average(taqwim, fard, ikhtibhar):
+    """حساب المعدل الجزائري: (تقويم×1 + فرض×1 + اختبار×2) / 4"""
     try:
-        bio = io.BytesIO(image_bytes)
-        im = Image.open(bio).convert("RGB")
-        return pytesseract.image_to_string(im, lang="ara+eng+fra")
-    except Exception:
-        return ""
+        t = float(taqwim or 0)
+        f = float(fard or 0)
+        i = float(ikhtibhar or 0)
+        return round((t * 1 + f * 1 + i * 2) / 4, 2)
+    except (TypeError, ValueError):
+        return 0.0
 
-def build_class_stats(stus: list, cls_name: str) -> dict:
-    """Build class statistics from student list."""
-    avgs = [s['average'] for s in stus]
-    passed = [a for a in avgs if a >= 10]
-    dist = {"0-5": 0, "5-10": 0, "10-15": 0, "15-20": 0}
-    for a in avgs:
-        if a < 5:
-            dist["0-5"] += 1
-        elif a < 10:
-            dist["5-10"] += 1
-        elif a < 15:
-            dist["10-15"] += 1
-        else:
-            dist["15-20"] += 1
-    sorted_stus = sorted(stus, key=lambda x: x['average'], reverse=True)
-    return {
-        "name": cls_name,
-        "total": len(stus),
-        "avg": sum(avgs) / max(len(avgs), 1),
-        "max": max(avgs) if avgs else 0.0,
-        "min": min(avgs) if avgs else 0.0,
-        "pass_rate": len(passed) / max(len(avgs), 1) * 100,
-        "distribution": dist,
-        "top5": [{"name": f"{s['nom']} {s['prenom']}", "avg": s['average']}
-                 for s in sorted_stus[:5]],
-        "students": stus,
-    }
-
-def parse_grade_book_excel(uploaded_file, sheet_name=None, merge_all_sheets=False) -> list:
-    """Parse Algerian grade book Excel file."""
-    students = []
+# FIX-3: دالة مساعِدة لتأمين تنسيق الأعداد الذكية مع None
+def safe_f(val, fmt=".2f") -> str:
+    """تحويل آمن لعدد مع تنسيق — يُعيد '—' عند None أو خطأ."""
     try:
-        uploaded_file.seek(0)
-        wb = openpyxl.load_workbook(uploaded_file, data_only=True)
-        if merge_all_sheets:
-            for nm in wb.sheetnames:
-                rows_list = list(wb[nm].iter_rows(values_only=True))
-                part = _parse_rows_from_list(rows_list)
-                for s in part:
-                    s['sheet_source'] = nm
-                students.extend(part)
-            return students
-        if sheet_name and sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-        else:
-            ws = wb.active
-        rows_list = list(ws.iter_rows(values_only=True))
-        return _parse_rows_from_list(rows_list)
-    except Exception:
-        uploaded_file.seek(0)
-        raw = uploaded_file.read()
-        bio = io.BytesIO(raw)
-        try:
-            xl = pd.ExcelFile(bio)
-        except Exception:
-            try:
-                df = pd.read_excel(bio, engine="openpyxl", header=None)
-                rows_list = [tuple(row) for row in df.values]
-                return _parse_rows_from_list(rows_list)
-            except Exception:
-                return []
+        return format(float(val), fmt)
+    except (TypeError, ValueError):
+        return "—"
 
-        if merge_all_sheets:
-            for nm in xl.sheet_names:
-                df = pd.read_excel(xl, sheet_name=nm, header=None)
-                rows_list = [tuple(row) for row in df.values]
-                part = _parse_rows_from_list(rows_list)
-                for s in part:
-                    s['sheet_source'] = nm
-                students.extend(part)
-            return students
-        sn = sheet_name if sheet_name and sheet_name in xl.sheet_names else xl.sheet_names[0]
-        df = pd.read_excel(xl, sheet_name=sn, header=None)
-        rows_list = [tuple(row) for row in df.values]
-        return _parse_rows_from_list(rows_list)
+def ar(txt) -> str:
+    return fix_arabic(txt)
 
-def _parse_rows_from_list(rows_list) -> list:
-    """Parse student data from worksheet rows."""
-    students = []
-    data_started = False
-    HEADER_MARKERS = {'matricule', 'رقم التعريف', 'اللقب', 'nom', 'prénom',
-                      'الاسم', 'تقويم', 'فرض', 'اختبار', 'taqwim'}
+# ─── PDF helpers ────────────────────────────────────────────
 
-    for i, row in enumerate(rows_list, 1):
-        if not any(c is not None for c in row):
-            continue
-
-        row_strs = [str(c).strip().lower() if c is not None else '' for c in row]
-
-        if not data_started:
-            if any(m in row_strs for m in HEADER_MARKERS):
-                data_started = True
-            continue
-
-        vals = list(row)
-        if len(vals) < 4:
-            continue
-
-        nom = str(vals[1] or '').strip()
-        if not nom or nom.lower() in ('اللقب', 'nom', 'prénom', 'الاسم'):
-            continue
-
-        try:
-            stu = {
-                'id': str(vals[0] or '').strip(),
-                'nom': nom,
-                'prenom': str(vals[2] or '').strip() if len(vals) > 2 else '',
-                'dob': str(vals[3] or '').strip() if len(vals) > 3 else '',
-                'taqwim': float(vals[4]) if len(vals) > 4 and vals[4] is not None else 0.0,
-                'fard': float(vals[5]) if len(vals) > 5 and vals[5] is not None else 0.0,
-                'ikhtibhar': float(vals[6]) if len(vals) > 6 and vals[6] is not None else 0.0,
-            }
-            stu['average'] = calc_average(stu['taqwim'], stu['fard'], stu['ikhtibhar'])
-            stu['apprec'] = get_appreciation(stu['average'])
-            students.append(stu)
-        except (ValueError, TypeError):
-            continue
-
-    return students
-
-def list_excel_sheet_names(uploaded_file) -> list:
-    """Get list of sheet names from Excel file."""
-    try:
-        uploaded_file.seek(0)
-        wb = openpyxl.load_workbook(uploaded_file, read_only=True, data_only=True)
-        names = list(wb.sheetnames)
-        wb.close()
-        return names
-    except Exception:
-        uploaded_file.seek(0)
-        raw = uploaded_file.read()
-        bio = io.BytesIO(raw)
-        try:
-            xl = pd.ExcelFile(bio)
-            return list(xl.sheet_names)
-        except Exception:
-            return []
-
-# ═══════════════════════════════════════════════════════════
-# PDF GENERATORS (Preserved with Arabic enhancement)
-# ═══════════════════════════════════════════════════════════
 def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool = True) -> bytes:
-    """Generate simple PDF with RTL support."""
     buf = io.BytesIO()
     _register_arabic_pdf_fonts()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.5*cm, leftMargin=1.5*cm,
-                            topMargin=1.2*cm, bottomMargin=2.0*cm)
+                            topMargin=1.2*cm, bottomMargin=1.5*cm)
     S = make_pdf_styles(rtl)
     story = []
-    
+    align_hdr = "RIGHT" if rtl else "LEFT"
     head_tbl = Table(
         [[Paragraph(pdf_text_line("الجمهورية الجزائرية الديمقراطية الشعبية", True), S["center"]),
           Paragraph(pdf_text_line("وزارة التربية الوطنية", True), S["center"])],
@@ -1029,21 +510,21 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
         colWidths=[8.2*cm, 8.2*cm],
     )
     head_tbl.setStyle(TableStyle([
-        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BOX", (0, 0), (-1, -1), 0.5, rl_colors.black),
-        ("BACKGROUND", (0, 0), (-1, -1), rl_colors.HexColor("#f4f2ff")),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("ALIGN",        (0, 0), (-1, -1), align_hdr),
+        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+        ("BOX",          (0, 0), (-1, -1), 0.5, rl_colors.black),
+        ("BACKGROUND",   (0, 0), (-1, -1), rl_colors.HexColor("#f4f2ff")),
+        ("TOPPADDING",   (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
     ]))
     story.append(head_tbl)
     story.append(Spacer(1, 8))
     story.append(Paragraph(pdf_text_line(f"DONIA MIND  |  {title}", rtl), S["title"]))
     if subtitle:
         story.append(Paragraph(pdf_text_line(subtitle, rtl), S["center"]))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=rl_colors.HexColor("#0d9488")))
+    story.append(HRFlowable(width="100%", thickness=1.5,
+                             color=rl_colors.HexColor("#0d9488")))
     story.append(Spacer(1, 10))
-    
     for line in content.splitlines():
         line = line.strip()
         if not line:
@@ -1057,17 +538,16 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
         else:
             story.append(Paragraph(pdf_text_line(line, rtl), S["body"]))
         story.append(Spacer(1, 2))
-    
-    doc.build(story, **_pdf_footer_canvas_args())
+    doc.build(story)
     buf.seek(0)
     return buf.read()
 
+# ─── EXAM PDF (النموذج الجزائري الرسمي) ────────────────────
 def generate_exam_pdf(exam_data: dict) -> bytes:
-    """Generate exam PDF with official Algerian template."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.8*cm, leftMargin=1.8*cm,
-                            topMargin=1.5*cm, bottomMargin=2.0*cm)
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
     subj = exam_data.get("subject", "") or ""
     rtl, lang = get_pdf_mode_for_subject(subj)
     S = make_pdf_styles(rtl)
@@ -1075,6 +555,7 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     fn_b = _AR_FONT_BOLD if rtl else "Helvetica-Bold"
     story = []
 
+    # رأس رسمي عربي دائماً — خلايا Paragraph بخط عربي مُسجَّل (Amiri/Cairo)
     def _cell(txt: str) -> Paragraph:
         return Paragraph(pdf_text_line(txt, True), make_pdf_styles(True)["body"])
 
@@ -1091,19 +572,20 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     ]
     t = Table(header_data2, colWidths=[10*cm, 6.5*cm])
     t.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('SPAN', (0, 0), (1, 0)),
-        ('SPAN', (0, 3), (1, 3)),
-        ('GRID', (0, 0), (-1, -1), 0.5, rl_colors.black),
+        ('ALIGN',      (0, 0), (-1, -1), 'RIGHT'),
+        ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
+        ('SPAN',       (0, 0), (1, 0)),
+        ('SPAN',       (0, 3), (1, 3)),
+        ('GRID',       (0, 0), (-1, -1), 0.5, rl_colors.black),
         ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor("#f0f0f0")),
     ]))
     story.append(t)
     story.append(Spacer(1, 8))
 
+    # FIX-2: نمط مُحدَّد بالكامل بدون underlineWidth (غير مدعوم في بعض الإصدارات)
     title_style = ParagraphStyle(
         "exam_etitle_" + ("rtl" if rtl else "ltr"),
-        fontName=fn_b, fontSize=14,
+        fontName=fn_b if rtl else "Helvetica-Bold", fontSize=14,
         alignment=TA_CENTER, leading=20,
         textColor=rl_colors.HexColor("#000000"))
     if rtl:
@@ -1120,9 +602,10 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     story.append(HRFlowable(width="100%", thickness=1.5, color=rl_colors.black))
     story.append(Spacer(1, 10))
 
+    # FIX-2: نمط العنوان الفرعي بدون underlineWidth
     exhead_style = ParagraphStyle(
         "exam_exhead_" + ("rtl" if rtl else "ltr"),
-        fontName=fn_b, fontSize=12,
+        fontName=fn_b if rtl else "Helvetica-Bold", fontSize=12,
         alignment=(TA_RIGHT if rtl else TA_LEFT), leading=18,
         textColor=rl_colors.HexColor("#000000"))
 
@@ -1144,34 +627,39 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     story.append(Spacer(1, 12))
     end_msg = "انتهى — بالتوفيق والنجاح" if rtl else "— End — Good luck"
     story.append(Paragraph(pdf_text_line(end_msg, rtl),
-                           ParagraphStyle("exam_end_" + ("rtl" if rtl else "ltr"),
-                                          fontName=fn_b, fontSize=11, alignment=TA_CENTER)))
-    doc.build(story, **_pdf_footer_canvas_args())
+                            ParagraphStyle("exam_end_" + ("rtl" if rtl else "ltr"),
+                                           fontName=fn_b if rtl else "Helvetica-Bold",
+                                           fontSize=11, alignment=TA_CENTER)))
+    doc.build(story)
     buf.seek(0)
     return buf.read()
 
+# ─── Grade Report PDF ─────────────────────────────────────
 def generate_report_pdf(report_data: dict) -> bytes:
-    """Generate pedagogical report PDF."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.5*cm, leftMargin=1.5*cm,
-                            topMargin=1.5*cm, bottomMargin=2.0*cm)
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
     _register_arabic_pdf_fonts()
+    fn_pdf = _AR_FONT_MAIN
+    fb_pdf = _AR_FONT_BOLD
     S = make_pdf_styles(True)
     story = []
 
-    story.append(Paragraph(fix_arabic("تحليل نتائج الأقسام"), S["title"]))
+    story.append(Paragraph(ar("تحليل نتائج الأقسام"), S["title"]))
     story.append(Paragraph(
-        fix_arabic(f"{report_data.get('school', '')} | "
-                   f"{report_data.get('subject', '')} | "
-                   f"{report_data.get('semester', '')}"),
+        ar(f"{report_data.get('school', '')} | "
+           f"{report_data.get('subject', '')} | "
+           f"{report_data.get('semester', '')}"),
         S["center"]))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=rl_colors.HexColor("#0d9488")))
+    story.append(HRFlowable(width="100%", thickness=1.5,
+                             color=rl_colors.HexColor("#0d9488")))
     story.append(Spacer(1, 12))
 
     for cls in report_data.get('classes', []):
-        story.append(Paragraph(fix_arabic(f"تحليل نتائج القسم {cls['name']}"), S["h2"]))
+        story.append(Paragraph(ar(f"تحليل نتائج القسم {cls['name']}"), S["h2"]))
 
+        # FIX-3: safe_f() بدلاً من :.2f مباشرةً على قيم محتملة None
         info_line = (
             f"عدد التلاميذ: {cls.get('total', 0)} — "
             f"المعدل: {safe_f(cls.get('avg', 0))} — "
@@ -1179,29 +667,21 @@ def generate_report_pdf(report_data: dict) -> bytes:
             f"أدنى: {safe_f(cls.get('min', 0))} — "
             f"النجاح: {safe_f(cls.get('pass_rate', 0), '.1f')}%"
         )
-        story.append(Paragraph(fix_arabic(info_line), S["body"]))
+        story.append(Paragraph(ar(info_line), S["body"]))
         story.append(Spacer(1, 6))
 
         if cls.get('top5'):
-            story.append(Paragraph(fix_arabic("أفضل 5 تلاميذ"), S["h2"]))
-            top_data = [[
-                Paragraph(fix_arabic("الرتبة"), S["body"]),
-                Paragraph(fix_arabic("الاسم"), S["body"]),
-                Paragraph(fix_arabic("المعدل"), S["body"]),
-            ]]
+            story.append(Paragraph(ar("أفضل 5 تلاميذ"), S["h2"]))
+            top_data = [[ar("الرتبة"), ar("الاسم"), ar("المعدل")]]
             for i, s in enumerate(cls['top5'], 1):
-                top_data.append([
-                    Paragraph(str(i), S["body"]),
-                    Paragraph(fix_arabic(s['name']), S["body"]),
-                    Paragraph(safe_f(s['avg']), S["body"]),
-                ])
+                top_data.append([str(i), ar(s['name']), safe_f(s['avg'])])
             t = Table(top_data, colWidths=[2*cm, 10*cm, 3*cm])
             t.setStyle(TableStyle([
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor("#667eea")),
-                ('TEXTCOLOR', (0, 0), (-1, 0), rl_colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, rl_colors.grey),
+                ('ALIGN',       (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME',    (0, 0), (-1, 0),  fb_pdf),
+                ('BACKGROUND',  (0, 0), (-1, 0),  rl_colors.HexColor("#667eea")),
+                ('TEXTCOLOR',   (0, 0), (-1, 0),  rl_colors.white),
+                ('GRID',        (0, 0), (-1, -1), 0.5, rl_colors.grey),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1),
                  [rl_colors.white, rl_colors.HexColor("#f8f8ff")]),
             ]))
@@ -1209,46 +689,232 @@ def generate_report_pdf(report_data: dict) -> bytes:
             story.append(Spacer(1, 6))
 
         if cls.get('distribution'):
-            story.append(Paragraph(fix_arabic("توزيع الدرجات"), S["h2"]))
+            story.append(Paragraph(ar("توزيع الدرجات"), S["h2"]))
             dist = cls['distribution']
             dist_data = [
-                [
-                    Paragraph(fix_arabic("0-5"), S["body"]),
-                    Paragraph(fix_arabic("5-10"), S["body"]),
-                    Paragraph(fix_arabic("10-15"), S["body"]),
-                    Paragraph(fix_arabic("15-20"), S["body"]),
-                ],
-                [
-                    Paragraph(str(dist.get('0-5', 0)), S["body"]),
-                    Paragraph(str(dist.get('5-10', 0)), S["body"]),
-                    Paragraph(str(dist.get('10-15', 0)), S["body"]),
-                    Paragraph(str(dist.get('15-20', 0)), S["body"]),
-                ],
+                [ar("0-5"),             ar("5-10"),             ar("10-15"),            ar("15-20")],
+                [str(dist.get('0-5', 0)), str(dist.get('5-10', 0)),
+                 str(dist.get('10-15', 0)), str(dist.get('15-20', 0))],
             ]
             t = Table(dist_data, colWidths=[4*cm]*4)
             t.setStyle(TableStyle([
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor("#302b63")),
-                ('TEXTCOLOR', (0, 0), (-1, 0), rl_colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, rl_colors.grey),
+                ('ALIGN',      (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME',   (0, 0), (-1, 0),  fb_pdf),
+                ('BACKGROUND', (0, 0), (-1, 0),  rl_colors.HexColor("#302b63")),
+                ('TEXTCOLOR',  (0, 0), (-1, 0),  rl_colors.white),
+                ('GRID',       (0, 0), (-1, -1), 0.5, rl_colors.grey),
             ]))
             story.append(t)
         story.append(Spacer(1, 16))
 
     if report_data.get('ai_analysis'):
-        story.append(Paragraph(fix_arabic("التحليل البيداغوجي"), S["h2"]))
+        story.append(Paragraph(ar("التحليل البيداغوجي"), S["h2"]))
         for line in report_data['ai_analysis'].splitlines():
             if line.strip():
-                story.append(Paragraph(fix_arabic(line.strip()), S["body"]))
+                story.append(Paragraph(ar(line.strip()), S["body"]))
         story.append(Spacer(1, 4))
 
-    doc.build(story, **_pdf_footer_canvas_args())
+    doc.build(story)
     buf.seek(0)
     return buf.read()
 
+# ─── Grade Book Excel ────────────────────────────────────────
+def generate_grade_book_excel(students: list, class_name: str,
+                               subject: str, semester: str, school: str) -> bytes:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "دفتر التنقيط"
+
+    title_font  = Font(name="Arial", bold=True, size=11)
+    header_font = Font(name="Arial", bold=True, size=10, color="FFFFFF")
+    body_font   = Font(name="Arial", size=10)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    right  = Alignment(horizontal="right",  vertical="center")
+    thin   = Side(style="thin", color="000000")
+    border = Border(top=thin, bottom=thin, left=thin, right=thin)
+
+    purple_fill = PatternFill("solid", fgColor="764ba2")
+    light_fill  = PatternFill("solid", fgColor="f0f0ff")
+
+    ws.merge_cells("A1:I1")
+    ws["A1"] = "الجمهورية الجزائرية الديمقراطية الشعبية"
+    ws["A1"].font = title_font; ws["A1"].alignment = center; ws["A1"].fill = light_fill
+
+    ws.merge_cells("A2:I2")
+    ws["A2"] = "وزارة التربية الوطنية"
+    ws["A2"].font = title_font; ws["A2"].alignment = center
+
+    ws.merge_cells("A3:I3")
+    ws["A3"] = f"متوسطة: {school}"
+    ws["A3"].font = title_font; ws["A3"].alignment = center
+
+    ws.merge_cells("A4:I4")
+    ws["A4"] = f"دفتر التنقيط | القسم: {class_name} | المادة: {subject} | {semester}"
+    ws["A4"].font = title_font; ws["A4"].alignment = center
+    ws["A4"].fill = PatternFill("solid", fgColor="e8e8ff")
+
+    ws.append([])
+
+    headers = ["رقم التعريف", "اللقب", "الاسم", "تاريخ الميلاد",
+               "تقويم /20", "فرض /20", "اختبار /20", "المعدل /20", "التقديرات"]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=6, column=col, value=h)
+        cell.font = header_font; cell.alignment = center
+        cell.fill = purple_fill; cell.border = border
+    ws.row_dimensions[6].height = 30
+
+    for idx, stu in enumerate(students):
+        row = 7 + idx
+        avg    = calc_average(stu.get('taqwim', 0), stu.get('fard', 0), stu.get('ikhtibhar', 0))
+        apprec = get_appreciation(avg)
+        values = [
+            stu.get('id', ''), stu.get('nom', ''), stu.get('prenom', ''),
+            str(stu.get('dob', '')), stu.get('taqwim', ''), stu.get('fard', ''),
+            stu.get('ikhtibhar', ''), avg, apprec,
+        ]
+        for col, val in enumerate(values, 1):
+            cell = ws.cell(row=row, column=col, value=val)
+            cell.font = body_font; cell.border = border
+            cell.alignment = center if col != 2 else right
+            if idx % 2 == 0:
+                cell.fill = PatternFill("solid", fgColor="f8f8ff")
+        ws.row_dimensions[row].height = 22
+
+    last_data = 6 + len(students)
+    ws.append([])
+    stat_row = last_data + 2
+    avgs_all = [calc_average(s.get('taqwim', 0), s.get('fard', 0), s.get('ikhtibhar', 0))
+                for s in students]
+    stats = [
+        ("عدد التلاميذ", len(students)),
+        ("معدل القسم", round(sum(avgs_all) / max(len(avgs_all), 1), 2)),
+        ("الناجحون", sum(1 for a in avgs_all if a >= 10)),
+    ]
+    for i, (label, val) in enumerate(stats):
+        lc = ws.cell(row=stat_row + i, column=1, value=label)
+        vc = ws.cell(row=stat_row + i, column=2, value=val)
+        lc.font = Font(bold=True, name="Arial", size=10)
+        vc.font = Font(bold=True, name="Arial", size=10, color="764ba2")
+        lc.fill = light_fill; vc.fill = light_fill
+        lc.border = border; vc.border = border
+
+    widths = [18, 16, 16, 14, 10, 10, 10, 10, 12]
+    for col, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(col)].width = w
+
+    ws.sheet_view.rightToLeft = True
+
+    buf = io.BytesIO()
+    wb.save(buf); buf.seek(0)
+    return buf.read()
+
+# ─── FIX-6: Parse Excel grade book — نسخة أكثر متانة ──────
+def parse_grade_book_excel(uploaded_file) -> list:
+    """
+    FIX-6: تحليل دفتر التنقيط الجزائري بصورة أكثر متانة.
+    يدعم:
+      - الملفات التي تبدأ ببيانات قبل العنوان
+      - الصفوف التي تحتوي على None جزئياً
+      - الملفات ذات الفتارات (blank rows) المتعددة
+      - .xlsx عبر openpyxl، مع fallback إلى pandas عند الحاجة
+    """
+    students = []
+    data_started = False
+    rows_list = []
+    try:
+        uploaded_file.seek(0)
+        wb = openpyxl.load_workbook(uploaded_file, data_only=True)
+        ws = wb.active
+        rows_list = list(ws.iter_rows(values_only=True))
+    except Exception:
+        uploaded_file.seek(0)
+        raw = uploaded_file.read()
+        bio = io.BytesIO(raw)
+        name = (getattr(uploaded_file, "name", "") or "").lower()
+        try:
+            df = pd.read_excel(bio, engine="openpyxl", header=None)
+        except Exception:
+            bio.seek(0)
+            try:
+                eng = "xlrd" if name.endswith(".xls") and not name.endswith(".xlsx") else None
+                df = pd.read_excel(bio, engine=eng, header=None) if eng else pd.read_excel(bio, header=None)
+            except Exception:
+                bio.seek(0)
+                df = pd.read_excel(bio, header=None)
+        rows_list = [tuple(row) for row in df.values]
+
+    HEADER_MARKERS = {'matricule', 'رقم التعريف', 'اللقب', 'nom', 'prénom',
+                      'الاسم', 'تقويم', 'فرض', 'اختبار', 'taqwim'}
+
+    for i, row in enumerate(rows_list, 1):
+        if not any(c is not None for c in row):
+            continue  # صف فارغ — تجاوُز
+
+        row_strs = [str(c).strip().lower() if c is not None else '' for c in row]
+
+        # كشف صف العناوين
+        if not data_started:
+            if any(m in row_strs for m in HEADER_MARKERS):
+                data_started = True
+            continue
+
+        # صف البيانات: يجب أن يكون عمود اللقب (index 1) غير فارغ
+        vals = list(row)
+        if len(vals) < 4:
+            continue
+
+        nom = str(vals[1] or '').strip()
+        if not nom or nom.lower() in ('اللقب', 'nom', 'prénom', 'الاسم'):
+            continue  # صف عنوان ثانوي أو فارغ
+
+        try:
+            stu = {
+                'id':        str(vals[0] or '').strip(),
+                'nom':       nom,
+                'prenom':    str(vals[2] or '').strip() if len(vals) > 2 else '',
+                'dob':       str(vals[3] or '').strip() if len(vals) > 3 else '',
+                'taqwim':    float(vals[4]) if len(vals) > 4 and vals[4] is not None else 0.0,
+                'fard':      float(vals[5]) if len(vals) > 5 and vals[5] is not None else 0.0,
+                'ikhtibhar': float(vals[6]) if len(vals) > 6 and vals[6] is not None else 0.0,
+            }
+            stu['average'] = calc_average(stu['taqwim'], stu['fard'], stu['ikhtibhar'])
+            stu['apprec']  = get_appreciation(stu['average'])
+            students.append(stu)
+        except (ValueError, TypeError):
+            continue  # صف تعليق أو بيانات غير عددية
+
+    return students
+
+# ─── FIX-4: دالة مساعِدة لبناء إحصاء قسم من قائمة تلاميذ ──
+def build_class_stats(stus: list, cls_name: str) -> dict:
+    """
+    FIX-4: حماية max()/min() على قوائم فارغة.
+    تُعيد dict موحَّد للإحصاءات مع قيم افتراضية آمنة.
+    """
+    avgs   = [s['average'] for s in stus]
+    passed = [a for a in avgs if a >= 10]
+    dist   = {"0-5": 0, "5-10": 0, "10-15": 0, "15-20": 0}
+    for a in avgs:
+        if   a < 5:  dist["0-5"]   += 1
+        elif a < 10: dist["5-10"]  += 1
+        elif a < 15: dist["10-15"] += 1
+        else:         dist["15-20"] += 1
+    sorted_stus = sorted(stus, key=lambda x: x['average'], reverse=True)
+    return {
+        "name":      cls_name,
+        "total":     len(stus),
+        "avg":       sum(avgs) / max(len(avgs), 1),
+        "max":       max(avgs) if avgs else 0.0,   # FIX-4
+        "min":       min(avgs) if avgs else 0.0,   # FIX-4
+        "pass_rate": len(passed) / max(len(avgs), 1) * 100,
+        "distribution": dist,
+        "top5": [{"name": f"{s['nom']} {s['prenom']}", "avg": s['average']}
+                 for s in sorted_stus[:5]],
+        "students": stus,
+    }
+
+# ─── Lesson Plan PDF (النموذج الرسمي للمذكرة) ───────────────
 def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
-    """Generate lesson plan PDF with official Algerian format."""
     buf = io.BytesIO()
     _register_arabic_pdf_fonts()
     rtl, _ = get_pdf_mode_for_subject(plan_data.get("subject", "") or "")
@@ -1256,7 +922,7 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     S = make_pdf_styles(rtl)
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             rightMargin=1.2*cm, leftMargin=1.2*cm,
-                            topMargin=1.2*cm, bottomMargin=2.0*cm)
+                            topMargin=1.2*cm, bottomMargin=1.2*cm)
     story = []
 
     story.append(Paragraph(
@@ -1267,7 +933,8 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
             f"مذكرة رقم: ____  |  المؤسسة: {plan_data.get('school', '.............')}  "
             f"|  الأستاذ(ة): {plan_data.get('teacher', '.............')}", True),
         S_ar["center"]))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=rl_colors.HexColor("#0d9488")))
+    story.append(HRFlowable(width="100%", thickness=1.5,
+                             color=rl_colors.HexColor("#0d9488")))
     story.append(Spacer(1, 6))
 
     info_data = [
@@ -1289,12 +956,12 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     ]
     t = Table(info_data, colWidths=[3.5*cm, 7*cm, 3.5*cm, 3.5*cm])
     t.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('GRID', (0, 0), (-1, -1), 0.5, rl_colors.black),
-        ('BACKGROUND', (0, 0), (0, -1), rl_colors.HexColor("#e8e8ff")),
-        ('BACKGROUND', (2, 0), (2, -2), rl_colors.HexColor("#e8e8ff")),
-        ('SPAN', (1, 3), (3, 3)),
+        ('ALIGN',      (0, 0), (-1, -1), 'RIGHT'),
+        ('FONTSIZE',   (0, 0), (-1, -1), 10),
+        ('GRID',       (0, 0), (-1, -1), 0.5, rl_colors.black),
+        ('BACKGROUND', (0, 0), (0, -1),  rl_colors.HexColor("#e8e8ff")),
+        ('BACKGROUND', (2, 0), (2, -2),  rl_colors.HexColor("#e8e8ff")),
+        ('SPAN',       (1, 3), (3, 3)),
     ]))
     story.append(t)
     story.append(Spacer(1, 6))
@@ -1307,9 +974,9 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     ]]
 
     sections = [
-        ("تهيئة", plan_data.get('duration_t', '5 د'), plan_data.get('intro', '')),
+        ("تهيئة",              plan_data.get('duration_t', '5 د'),  plan_data.get('intro', '')),
         ("أنشطة بناء الموارد", plan_data.get('duration_b', '25 د'), plan_data.get('build', '')),
-        ("إعادة الاستثمار", plan_data.get('duration_r', '15 د'), plan_data.get('reinvest', '')),
+        ("إعادة الاستثمار",    plan_data.get('duration_r', '15 د'), plan_data.get('reinvest', '')),
     ]
     for section, dur, content in sections:
         lesson_rows.append([
@@ -1328,15 +995,17 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     col_widths = [2.5*cm, 1.5*cm, 10*cm, 3.5*cm]
     lt = Table(lesson_rows, colWidths=col_widths, repeatRows=1)
     lt.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor("#0f766e")),
-        ('TEXTCOLOR', (0, 0), (-1, 0), rl_colors.white),
-        ('GRID', (0, 0), (-1, -1), 0.5, rl_colors.black),
-        ('BACKGROUND', (0, 1), (0, -1), rl_colors.HexColor("#f0fdfa")),
+        ('ALIGN',       (0, 0), (-1, -1), 'RIGHT'),
+        ('VALIGN',      (0, 0), (-1, -1), 'TOP'),
+        ('FONTSIZE',    (0, 0), (-1, -1), 9),
+        ('BACKGROUND',  (0, 0), (-1, 0),  rl_colors.HexColor("#0f766e")),
+        ('TEXTCOLOR',   (0, 0), (-1, 0),  rl_colors.white),
+        ('GRID',        (0, 0), (-1, -1), 0.5, rl_colors.black),
+        ('BACKGROUND',  (0, 1), (0, -1),  rl_colors.HexColor("#f0fdfa")),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1),
          [rl_colors.white, rl_colors.HexColor("#f8fafc")]),
+        # FIX: WORDWRAP حُذف (غير مدعوم)، نستخدم Paragraph بدلاً منه
+        # FIX: ROWHEIGHT بتنسيق صحيح لصفوف المحتوى (ارتفاع أدنى)
         ('MINROWHEIGHT', (0, 1), (-1, -2), 60),
     ]))
     story.append(lt)
@@ -1353,722 +1022,96 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     ]
     pt = Table(pre_data, colWidths=[3.5*cm, 14*cm])
     pt.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('GRID', (0, 0), (-1, -1), 0.5, rl_colors.black),
-        ('BACKGROUND', (0, 0), (0, -1), rl_colors.HexColor("#e8e8ff")),
+        ('ALIGN',      (0, 0), (-1, -1), 'RIGHT'),
+        ('FONTSIZE',   (0, 0), (-1, -1), 9),
+        ('GRID',       (0, 0), (-1, -1), 0.5, rl_colors.black),
+        ('BACKGROUND', (0, 0), (0, -1),  rl_colors.HexColor("#e8e8ff")),
     ]))
     story.append(pt)
-    doc.build(story, **_pdf_footer_canvas_args())
+    doc.build(story)
     buf.seek(0)
     return buf.read()
 
 # ═══════════════════════════════════════════════════════════
-# WORD (.docx) EXPORT (Preserved)
-# ═══════════════════════════════════════════════════════════
-def _docx_set_rtl(paragraph):
-    pPr = paragraph._p.get_or_add_pPr()
-    bidi_el = OxmlElement('w:bidi')
-    bidi_el.set(qn('w:val'), '1')
-    pPr.append(bidi_el)
-
-def _docx_heading(doc, text: str, level: int = 1, color_hex: str = "145a32"):
-    p = doc.add_heading(text, level=level)
-    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    _docx_set_rtl(p)
-    for run in p.runs:
-        r, g, b = (int(color_hex[i:i+2], 16) for i in (0, 2, 4))
-        run.font.color.rgb = RGBColor(r, g, b)
-    return p
-
-def _docx_para(doc, text: str, bold: bool = False, size: int = 12,
-               align=WD_ALIGN_PARAGRAPH.RIGHT):
-    p = doc.add_paragraph()
-    p.alignment = align
-    _docx_set_rtl(p)
-    run = p.add_run(text)
-    run.bold = bold
-    run.font.size = Pt(size)
-    return p
-
-def generate_exam_docx(exam_data: dict) -> bytes:
-    if not _DOCX_AVAILABLE:
-        return b""
-    doc = DocxDocument()
-    for section in doc.sections:
-        section.top_margin = Cm(2)
-        section.bottom_margin = Cm(2)
-        section.left_margin = Cm(2.5)
-        section.right_margin = Cm(2.5)
-
-    hdr = doc.add_table(rows=3, cols=2)
-    hdr.style = 'Table Grid'
-    cells = hdr.rows[0].cells
-    cells[0].text = exam_data.get('school', '')
-    cells[1].text = "الجمهورية الجزائرية الديمقراطية الشعبية"
-    cells = hdr.rows[1].cells
-    cells[0].text = f"السنة الدراسية: {exam_data.get('year', '')}"
-    cells[1].text = "وزارة التربية الوطنية"
-    cells = hdr.rows[2].cells
-    cells[0].text = f"المدة: {exam_data.get('duration', '')}"
-    cells[1].text = (f"المستوى: {exam_data.get('grade', '')}   |   "
-                     f"المقاطعة: {exam_data.get('district', '')}")
-    for row in hdr.rows:
-        for cell in row.cells:
-            for para in cell.paragraphs:
-                para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                _docx_set_rtl(para)
-                for run in para.runs:
-                    run.font.size = Pt(10)
-
-    doc.add_paragraph()
-    title_p = doc.add_paragraph()
-    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _docx_set_rtl(title_p)
-    run = title_p.add_run(
-        f"اختبار {exam_data.get('semester', '')} في مادة {exam_data.get('subject', '')}")
-    run.bold = True
-    run.font.size = Pt(14)
-
-    doc.add_paragraph()
-    content = exam_data.get('content', '')
-    for line in content.split('\n'):
-        _docx_para(doc, line)
-
-    doc.add_paragraph()
-    sign_p = doc.add_paragraph("بالتوفيق                                              إنتهى")
-    sign_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    buf = io.BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    return buf.read()
-
-def generate_lesson_plan_docx(plan_data: dict) -> bytes:
-    if not _DOCX_AVAILABLE:
-        return b""
-    doc = DocxDocument()
-    for section in doc.sections:
-        section.top_margin = Cm(2)
-        section.bottom_margin = Cm(2)
-        section.left_margin = Cm(2.5)
-        section.right_margin = Cm(2.5)
-
-    _docx_heading(doc, "المذكرة البيداغوجية — DONIA MIND", level=1)
-
-    info_rows = [
-        ["المؤسسة", plan_data.get('school', '')],
-        ["الأستاذ(ة)", plan_data.get('teacher', '')],
-        ["المادة", plan_data.get('subject', '')],
-        ["المستوى", plan_data.get('grade', '')],
-        ["الدرس", plan_data.get('lesson', '')],
-        ["المجال", plan_data.get('domain', '')],
-        ["المدة الإجمالية", plan_data.get('duration', '')],
-    ]
-    tbl = doc.add_table(rows=len(info_rows), cols=2)
-    tbl.style = 'Table Grid'
-    for i, (label, val) in enumerate(info_rows):
-        cells = tbl.rows[i].cells
-        cells[0].text = label
-        cells[1].text = val
-        for cell in cells:
-            for para in cell.paragraphs:
-                para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                _docx_set_rtl(para)
-
-    doc.add_paragraph()
-    _docx_heading(doc, "محتوى المذكرة", level=2, color_hex="1e8449")
-    content = plan_data.get('content', '')
-    for line in content.split('\n'):
-        _docx_para(doc, line)
-
-    buf = io.BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    return buf.read()
-
-def generate_report_docx(report_data: dict) -> bytes:
-    if not _DOCX_AVAILABLE:
-        return b""
-    doc = DocxDocument()
-    for section in doc.sections:
-        section.top_margin = Cm(2)
-        section.bottom_margin = Cm(2)
-        section.left_margin = Cm(2.5)
-        section.right_margin = Cm(2.5)
-
-    _docx_heading(doc, "تقرير تحليل نتائج الأقسام", level=1)
-    _docx_para(doc,
-               f"المادة: {report_data.get('subject', '')}   |   "
-               f"الفصل: {report_data.get('semester', '')}   |   "
-               f"المؤسسة: {report_data.get('school', '')}",
-               bold=True)
-    doc.add_paragraph()
-
-    for cls in report_data.get('classes', []):
-        _docx_heading(doc, f"القسم: {cls.get('name', '')}", level=2, color_hex="1e8449")
-        stats_rows = [
-            ["عدد التلاميذ", str(cls.get('total', ''))],
-            ["المعدل العام", str(cls.get('avg', ''))],
-            ["أعلى معدل", str(cls.get('max', ''))],
-            ["أدنى معدل", str(cls.get('min', ''))],
-            ["نسبة النجاح %", str(cls.get('pass_rate', ''))],
-        ]
-        tbl = doc.add_table(rows=len(stats_rows), cols=2)
-        tbl.style = 'Table Grid'
-        for i, (label, val) in enumerate(stats_rows):
-            cells = tbl.rows[i].cells
-            cells[0].text = label
-            cells[1].text = val
-            for cell in cells:
-                for para in cell.paragraphs:
-                    para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                    _docx_set_rtl(para)
-        doc.add_paragraph()
-
-        top5 = cls.get('top5', [])
-        if top5:
-            _docx_para(doc, "أفضل 5 تلاميذ:", bold=True)
-            for idx, s in enumerate(top5, 1):
-                _docx_para(doc, f"  {idx}. {s['name']} — {s['avg']:.2f}")
-        doc.add_paragraph()
-
-    if report_data.get('ai_analysis'):
-        _docx_heading(doc, "التقرير البيداغوجي (الذكاء الاصطناعي)", level=2, color_hex="922b21")
-        for line in report_data['ai_analysis'].split('\n'):
-            _docx_para(doc, line)
-
-    buf = io.BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    return buf.read()
-
-# ═══════════════════════════════════════════════════════════
-# PAGE CONFIG
-# ═══════════════════════════════════════════════════════════
-st.set_page_config(page_title="DONIA MIND — المعلم الذكي", page_icon="🎓",
-                   layout="wide", initial_sidebar_state="expanded")
-
-# ═══════════════════════════════════════════════════════════
-# CSS — Enhanced with Floating Assistant Styles
-# ═══════════════════════════════════════════════════════════
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;800&family=Montserrat:wght@400;600;700;800;900&display=swap');
-
-#MainMenu{visibility:hidden!important}
-footer{visibility:hidden!important}
-header{visibility:hidden!important}
-.stDeployButton{display:none!important}
-[data-testid="stToolbar"]{display:none!important}
-[data-testid="stDecoration"]{display:none!important}
-[data-testid="stStatusWidget"]{display:none!important}
-a[href*="streamlit.io"]{display:none!important}
-
-*,*::before,*::after{font-family:'Cairo','Amiri','Tajawal',sans-serif!important}
-.stApp{background:#ffffff;color:#111111;}
-.main{direction:rtl;text-align:right;color:#111111!important}
-.block-container{color:#111111!important;background:#ffffff;}
-
-h1{color:#c0392b!important;font-weight:800!important}
-h2{color:#145a32!important;font-weight:700!important}
-h3{color:#1e8449!important;font-weight:700!important}
-
-.title-card{
-  background:linear-gradient(135deg,#145a32 0%,#1e8449 50%,#27ae60 100%);
-  padding:1.75rem 2rem;border-radius:24px;text-align:center;
-  margin-bottom:1rem;box-shadow:0 16px 48px rgba(20,90,50,.45);
-  border:3px solid #c0392b;
-}
-.title-card h1{color:#ffffff!important;font-size:2.05rem;font-weight:800;margin:0;letter-spacing:.02em}
-.title-card p{color:rgba(255,255,255,.92);font-size:.96rem;margin:.45rem 0 0;line-height:1.65}
-
-.welcome-banner{
-  background:linear-gradient(135deg,#fdfefe,#f9f9f9);
-  border:2px solid #27ae60;border-left:8px solid #c0392b;
-  border-radius:14px;padding:1.1rem 1.5rem;margin:.75rem 0 1.25rem;
-  direction:rtl;text-align:right;
-  font-size:1.05rem;font-weight:600;color:#145a32;
-  box-shadow:0 4px 16px rgba(20,90,50,.12);
-}
-
-/* Floating AI Assistant */
-.floating-assistant {
-  position: fixed;
-  bottom: 80px;
-  right: 20px;
-  z-index: 1000;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-.floating-assistant:hover {
-  transform: scale(1.05);
-}
-.assistant-bubble {
-  background: linear-gradient(135deg, #145a32, #1e8449);
-  border-radius: 50%;
-  width: 60px;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 20px rgba(20,90,50,.4);
-  border: 2px solid #c0392b;
-  animation: pulse 2s ease-in-out infinite;
-}
-@keyframes pulse {
-  0%,100%{box-shadow:0 4px 20px rgba(39,174,96,.4)}
-  50%{box-shadow:0 8px 30px rgba(192,57,43,.6)}
-}
-.assistant-bubble svg {
-  width: 40px;
-  height: 40px;
-}
-
-.donia-robot-wrap{display:flex;justify-content:center;align-items:center;margin:.75rem 0}
-.donia-robot{
-  width:88px;height:88px;border-radius:22px;
-  background:linear-gradient(180deg,#145a32,#1e8449);
-  box-shadow:0 0 28px rgba(39,174,96,.55), inset 0 1px 0 rgba(255,255,255,.12);
-  display:flex;align-items:center;justify-content:center;
-  animation:doniaPulse 2.2s ease-in-out infinite;
-  border:2px solid rgba(192,57,43,.6);
-}
-.donia-robot svg{width:64px;height:64px;opacity:.95}
-@keyframes doniaPulse{
-  0%,100%{transform:scale(1);box-shadow:0 0 28px rgba(39,174,96,.45)}
-  50%{transform:scale(1.04);box-shadow:0 0 44px rgba(39,174,96,.85)}
-}
-
-div.stButton>button{
-  background:linear-gradient(135deg,#1e8449,#145a32)!important;color:#ffffff!important;
-  border:none!important;border-radius:18px!important;
-  padding:0.85rem 1.65rem!important;min-height:3.1rem!important;
-  font-weight:800!important;font-size:1.02rem!important;width:100%!important;
-  transition:transform .22s, box-shadow .22s!important;
-  box-shadow:0 6px 22px rgba(30,132,73,.45)!important;
-}
-div.stButton>button:hover{
-  transform:translateY(-3px)!important;
-  box-shadow:0 12px 36px rgba(192,57,43,.5)!important;
-  background:linear-gradient(135deg,#c0392b,#922b21)!important;
-}
-
-.stat-card{background:linear-gradient(135deg,rgba(30,132,73,.1),rgba(39,174,96,.08));
-  border:2px solid #27ae60;border-radius:16px;
-  padding:1.1rem;text-align:center;margin-bottom:.75rem}
-.stat-card h2{font-size:1.85rem;margin:0;color:#145a32!important}
-.stat-card p{margin:0;color:#333;font-size:.86rem}
-
-.feature-card{background:#f9f9f9;border:1px solid #27ae60;
-  border-right:5px solid #1e8449;
-  border-radius:16px;padding:1.25rem;margin:.55rem 0;
-  direction:rtl;text-align:right;color:#111}
-.feature-card h4{color:#1e8449;margin:0 0 .45rem;font-size:1.02rem}
-
-.result-box{background:#f9f9f9;border:1px solid rgba(30,132,73,.3);
-  border-radius:16px;padding:1.45rem;direction:rtl;text-align:right;
-  color:#111;line-height:2;margin:.85rem 0}
-
-.db-item{background:#f4f9f4;border-right:4px solid #1e8449;
-  border-radius:10px;padding:.85rem 1.05rem;margin:.45rem 0;
-  direction:rtl;text-align:right;color:#111}
-
-.error-box{background:rgba(192,57,43,.08);border:2px solid #c0392b;
-  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
-  color:#922b21;margin:.65rem 0;font-weight:600}
-.success-box{background:rgba(30,132,73,.08);border:2px solid #27ae60;
-  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
-  color:#145a32;margin:.65rem 0;font-weight:600}
-.warn-box{background:rgba(243,156,18,.1);border:2px solid #f39c12;
-  border-radius:12px;padding:1rem;direction:rtl;text-align:right;
-  color:#784212;margin:.65rem 0}
-.template-box{background:rgba(30,132,73,.06);border:2px dashed #27ae60;
-  border-radius:14px;padding:1.05rem;direction:rtl;text-align:right;
-  color:#145a32;margin:.65rem 0;font-size:.9rem;line-height:1.85}
-
-.grade-A{color:#1e8449;font-weight:700}
-.grade-B{color:#2e86c1;font-weight:700}
-.grade-C{color:#d4ac0d;font-weight:700}
-.grade-D{color:#c0392b;font-weight:700}
-
-section[data-testid="stSidebar"]{
-  direction:rtl;
-  background:linear-gradient(180deg,#f4fbf6,#eaf6ee)!important;
-  border-left:4px solid #27ae60;
-}
-section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
-
-.stTabs [data-baseweb="tab"]{direction:rtl;font-size:.9rem;font-weight:700;color:#145a32}
-.stTabs [data-baseweb="tab"][aria-selected="true"]{
-  border-bottom:3px solid #c0392b!important;color:#c0392b!important}
-
-.stSelectbox label,.stTextInput label,.stTextArea label,
-.stNumberInput label,.stSlider label,.stFileUploader label,.stRadio label{
-  direction:rtl;text-align:right;color:#145a32!important;font-weight:700}
-
-.api-book-widget{
-  background:linear-gradient(135deg,#f4fbf6,#eaf6ee);
-  border:2px solid #27ae60;border-radius:16px;
-  padding:1.1rem 1.2rem;text-align:center;margin:.5rem 0;
-}
-.api-book-icon{font-size:2.4rem;display:block;margin-bottom:.35rem}
-.api-book-slogan{font-size:1rem;font-weight:800;color:#145a32;
-  display:block;letter-spacing:.03em}
-.api-book-status-active{
-  display:block;margin-top:.4rem;font-size:.88rem;font-weight:700;
-  color:#1e8449;background:#d5f5e3;border-radius:8px;padding:.2rem .7rem;
-}
-.api-book-status-inactive{
-  display:block;margin-top:.4rem;font-size:.88rem;font-weight:700;
-  color:#c0392b;background:#fdecea;border-radius:8px;padding:.2rem .7rem;
-}
-
-.donia-social{display:flex;flex-wrap:wrap;gap:.45rem;justify-content:center;margin:.35rem 0}
-.donia-social a{
-  display:inline-block;padding:.35rem .75rem;border-radius:12px;
-  background:#145a32;color:#ffffff!important;font-weight:700;font-size:.82rem;
-  text-decoration:none!important;border:1px solid #27ae60;
-  transition:transform .2s,box-shadow .2s;
-}
-.donia-social a:hover{
-  transform:translateY(-2px);
-  box-shadow:0 6px 18px rgba(192,57,43,.4);
-  background:#c0392b!important;
-}
-
-.donia-ip-footer{
-  text-align:center;font-size:.85rem;color:#145a32;font-weight:600;
-  padding:1.2rem 0 .5rem;margin-top:1.5rem;
-  border-top:3px solid #27ae60;
-  background:linear-gradient(90deg,#f4fbf6,#fef9f9,#f4fbf6);
-  border-radius:0 0 12px 12px;
-}
-.donia-footer-social{display:flex;flex-wrap:wrap;gap:.6rem;justify-content:center;margin:.5rem 0}
-.donia-footer-social a{
-  display:inline-flex;align-items:center;gap:.3rem;
-  padding:.4rem .9rem;border-radius:20px;
-  background:#145a32;color:#ffffff!important;font-weight:700;font-size:.82rem;
-  text-decoration:none!important;transition:background .2s,transform .2s;
-}
-.donia-footer-social a:hover{background:#c0392b!important;transform:translateY(-2px)}
-
-.donia-slogan-bar{
-  display:flex;flex-direction:column;align-items:center;
-  gap:.3rem;padding:.9rem 1.5rem;margin:.6rem 0;
-  background:linear-gradient(90deg,#145a32 0%,#1e8449 45%,#c0392b 100%);
-  border-radius:14px;
-  box-shadow:0 4px 20px rgba(20,90,50,.3);
-}
-.donia-slogan-ar{
-  font-family:'Cairo','Amiri',sans-serif;
-  font-size:1.35rem;font-weight:800;
-  color:#ffffff;letter-spacing:.04em;
-  text-shadow:0 2px 6px rgba(0,0,0,.3);
-}
-.donia-slogan-en{
-  font-family:'Montserrat',sans-serif;
-  font-size:.9rem;font-weight:600;
-  color:rgba(255,255,255,.88);letter-spacing:.18em;
-  text-transform:uppercase;
-}
-.donia-slogan-divider{
-  width:40px;height:2px;
-  background:rgba(255,255,255,.55);border-radius:2px;
-}
-
-.stButton>button{
-  border-radius:14px!important;
-  font-family:'Cairo',sans-serif!important;
-  font-weight:700!important;
-  font-size:.95rem!important;
-  padding:.55rem 1.4rem!important;
-  border:2px solid #27ae60!important;
-  background:linear-gradient(135deg,#145a32,#1e8449)!important;
-  color:#ffffff!important;
-  transition:all .22s cubic-bezier(.4,0,.2,1)!important;
-  box-shadow:0 4px 14px rgba(20,90,50,.22)!important;
-  letter-spacing:.02em!important;
-}
-.stButton>button:hover{
-  transform:translateY(-3px) scale(1.025)!important;
-  background:linear-gradient(135deg,#c0392b,#e74c3c)!important;
-  border-color:#c0392b!important;
-  box-shadow:0 8px 28px rgba(192,57,43,.45)!important;
-}
-.stButton>button:active{transform:translateY(0) scale(.98)!important}
-
-.feature-card{border-radius:16px!important}
-.success-box{border-radius:12px!important}
-.error-box{border-radius:12px!important}
-.result-box{border-radius:16px!important}
-.template-box{border-radius:12px!important}
-
-.stTextInput>div>div>input,
-.stTextArea>div>div>textarea,
-.stSelectbox>div>div{
-  border-radius:12px!important;
-  border:2px solid #27ae60!important;
-  font-family:'Cairo',sans-serif!important;
-  transition:border-color .2s,box-shadow .2s!important;
-}
-.stTextInput>div>div>input:focus,
-.stTextArea>div>div>textarea:focus{
-  border-color:#c0392b!important;
-  box-shadow:0 0 0 3px rgba(192,57,43,.18)!important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════
-# PHASE 2: FLOATING AI ASSISTANT (Chat Message Component)
-# ═══════════════════════════════════════════════════════════
-def render_floating_assistant():
-    """Render floating AI assistant with chat interface."""
-    # Initialize session state for assistant
-    if "assistant_messages" not in st.session_state:
-        st.session_state.assistant_messages = [
-            {"role": "assistant", "content": "🌟 مرحباً بك في DONIA MIND! أنا مساعدك الذكي. كيف يمكنني مساعدتك اليوم؟"}
-        ]
-    if "assistant_open" not in st.session_state:
-        st.session_state.assistant_open = False
-    
-    # Floating button HTML
-    button_html = f"""
-    <div class="floating-assistant" id="assistantToggle" onclick="document.getElementById('assistantChat').style.display = document.getElementById('assistantChat').style.display === 'none' ? 'block' : 'none';">
-        <div class="assistant-bubble">
-            <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
-                <rect x="15" y="18" width="50" height="44" rx="14" fill="#ffffff" stroke="#c0392b" stroke-width="2"/>
-                <circle cx="31" cy="36" r="5" fill="#145a32"/>
-                <circle cx="49" cy="36" r="5" fill="#145a32"/>
-                <circle cx="32" cy="35" r="2" fill="white"/>
-                <circle cx="50" cy="35" r="2" fill="white"/>
-                <path d="M30 52 Q40 58 50 52" stroke="#c0392b" stroke-width="2.5" fill="none"/>
-                <line x1="40" y1="18" x2="40" y2="12" stroke="#c0392b" stroke-width="2"/>
-                <circle cx="40" cy="10" r="3" fill="#c0392b"/>
-            </svg>
-        </div>
-    </div>
-    """
-    st.markdown(button_html, unsafe_allow_html=True)
-    
-    # Chat panel container
-    with st.container():
-        st.markdown('<div id="assistantChat" style="display: none;">', unsafe_allow_html=True)
-        with st.chat_message("assistant", avatar="🤖"):
-            st.markdown("🌟 مرحباً بك في DONIA MIND! أنا مساعدك الذكي.")
-            st.markdown("يمكنني مساعدتك في:")
-            st.markdown("- 📝 إعداد المذكرات")
-            st.markdown("- 📄 توليد الاختبارات")
-            st.markdown("- 📊 تحليل النتائج")
-            st.markdown("- ✅ تصحيح الإجابات")
-        
-        # Chat input
-        user_input = st.chat_input("اكتب سؤالك هنا...", key="assistant_input")
-        if user_input:
-            st.session_state.assistant_messages.append({"role": "user", "content": user_input})
-            with st.chat_message("user"):
-                st.markdown(user_input)
-            
-            # Generate response
-            with st.chat_message("assistant"):
-                response = generate_assistant_response(user_input)
-                st.markdown(response)
-                st.session_state.assistant_messages.append({"role": "assistant", "content": response})
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # JavaScript to toggle chat visibility
-        st.markdown("""
-        <script>
-        const toggleBtn = document.getElementById('assistantToggle');
-        const chatPanel = document.getElementById('assistantChat');
-        if (toggleBtn) {
-            toggleBtn.onclick = function(e) {
-                e.stopPropagation();
-                if (chatPanel.style.display === 'none') {
-                    chatPanel.style.display = 'block';
-                } else {
-                    chatPanel.style.display = 'none';
-                }
-            };
-        }
-        </script>
-        """, unsafe_allow_html=True)
-
-def generate_assistant_response(query: str) -> str:
-    """Generate AI assistant response using Groq."""
-    if not GROQ_API_KEY:
-        return "⚠️ عذراً، مفتاح API غير متوفر. يرجى إضافة GROQ_API_KEY في إعدادات التطبيق."
-    
-    try:
-        prompt = f"""أنت مساعد تربوي ذكي متخصص في المنظومة التعليمية الجزائرية.
-        المستخدم يسأل: {query}
-        
-        قدم إجابة مفيدة ودقيقة حول:
-        - المذكرات والاختبارات
-        - طرق التدريس
-        - المنهاج الجزائري
-        - التنقيط والتقييم
-        
-        كن مختصراً وواضحاً."""
-        
-        llm = get_llm(DEFAULT_GROQ_MODEL, GROQ_API_KEY)
-        response = llm.invoke(prompt).content
-        return response
-    except Exception as e:
-        return f"❌ حدث خطأ: {str(e)}"
-
-# ═══════════════════════════════════════════════════════════
-# SIDEBAR (Enhanced with QR Code and Logo)
+# SIDEBAR
 # ═══════════════════════════════════════════════════════════
 with st.sidebar:
-    # Logo
-    _logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_donia.jpg")
-    if os.path.isfile(_logo_path):
-        st.image(_logo_path, width=220, caption="DONIA LABS TECH")
-    
-    # QR Code
-    try:
-        qr_buf = generate_qr_code(APP_URL, size=120)
-        st.image(qr_buf, caption="مسح للوصول السريع", width=120)
-    except Exception:
-        st.caption("📱 مسح للوصول للتطبيق")
-    
     st.markdown("## ⚙️ الإعدادات العامة")
-    
-    # API Key Status (No UI input - stealth mode)
-    if GROQ_API_KEY:
-        st.markdown(
-            '<div class="api-book-widget">'
-            '<span class="api-book-icon">📖</span>'
-            '<span class="api-book-slogan">العلم هو السلاح</span>'
-            '<span class="api-book-status-active">✅ Groq: نشط</span>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            '<div class="api-book-widget">'
-            '<span class="api-book-icon">📖</span>'
-            '<span class="api-book-slogan">العلم هو السلاح</span>'
-            '<span class="api-book-status-inactive">⛔ Groq: غير نشط</span>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-    
-    # FIX 2: Arcee connection status using real handshake
-    arcee_connected = test_arcee_connection()
-    if arcee_connected:
-        st.markdown(
-            '<div class="success-box" style="text-align:center">🤖 Arcee: متصل</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            '<div class="error-box" style="text-align:center">🤖 Arcee: غير متصل</div>',
-            unsafe_allow_html=True,
-        )
-    
+    api_key = os.getenv("GROQ_API_KEY", "")
+
     level = st.selectbox("🏫 الطور التعليمي", list(CURRICULUM.keys()))
-    info = CURRICULUM[level]
+    info  = CURRICULUM[level]
     grade = st.selectbox("📚 السنة الدراسية", info["grades"])
-    
+
     branch = None
     if info["branches"] and grade in info["branches"]:
         branch = st.selectbox("🎯 الشعبة", list(info["branches"][grade].keys()))
-    
+
     if info["subjects"]:
         subj_list = info["subjects"].get(grade) or info["subjects"].get("_default", [])
     elif info["branches"] and grade in info["branches"] and branch:
         subj_list = info["branches"][grade][branch]
     else:
         subj_list = []
-    subject = (st.selectbox("📖 المادة", subj_list) if subj_list
-               else st.text_input("📖 المادة", key="sb_subject"))
-    
+    subject    = (st.selectbox("📖 المادة", subj_list) if subj_list
+                  else st.text_input("📖 المادة", key="sb_subject"))
+    # واجهة احترافية: لا عرض لاسم نموذج الذكاء الاصطناعي (يُضبط عبر متغير البيئة GROQ_MODEL)
+    # GROQ_MODELS يُبقى في الكود مرجعاً داخلياً دون عرض في الواجهة العامة
+    # model_name = st.selectbox("🤖 النموذج", GROQ_MODELS)
+
     st.markdown("---")
     st.markdown("**🏫 معلومات المؤسسة**")
-    school_name = st.text_input("اسم المتوسطة / الثانوية",
+    school_name  = st.text_input("اسم المتوسطة / الثانوية",
                                   placeholder="متوسطة الشهيد...", key="school_name")
     teacher_name = st.text_input("اسم الأستاذ(ة)",
                                   placeholder="الأستاذ(ة)...", key="teacher_name")
-    wilaya = st.text_input("الولاية",
-                              placeholder="الجزائر...", key="wilaya")
-    school_year = st.text_input("السنة الدراسية", value="2025/2026", key="syear")
-    
-    st.markdown("---")
-    st.markdown("**تواصل — DONIA LABS TECH**")
-    st.markdown(
-        f"""
-        <div class="donia-social">
-          <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer" title="WhatsApp">📱 WA</a>
-          <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer" title="LinkedIn">💼 in</a>
-          <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook">📘 f</a>
-          <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer" title="Telegram">✈️ TG</a>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    wilaya       = st.text_input("الولاية",
+                                  placeholder="الجزائر...", key="wilaya")
+    school_year  = st.text_input("السنة الدراسية", value="2025/2026", key="syear")
 
+    st.markdown("---")
+    if api_key:
+        st.markdown('<div class="success-box">✅ مفتاح Groq API متاح</div>',
+                    unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="error-box">❌ GROQ_API_KEY غير موجود</div>',
+                    unsafe_allow_html=True)
+
+    with st.expander("☁️ إعدادات السحابة"):
+        drive_json    = st.text_area("مفتاح Google Drive (JSON)", height=60,
+                                      placeholder='{"type":"service_account",...}')
+        firebase_json = st.text_area("مفتاح Firebase (JSON)", height=60,
+                                      placeholder='{"type":"service_account",...}')
+
+# نموذج التوليد الافتراضي (غير معروض في الواجهة — FIX أمان واجهة)
 model_name = DEFAULT_GROQ_MODEL
 
 # ═══════════════════════════════════════════════════════════
 # HEADER
 # ═══════════════════════════════════════════════════════════
 st.markdown("""
-<div class="donia-slogan-bar">
-  <span class="donia-slogan-ar">بالعلم نرتقي</span>
-  <div class="donia-slogan-divider"></div>
-  <span class="donia-slogan-en">Education Uplifts Us</span>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown(f"""
 <div class="title-card">
-    <h1 style="color:#ffffff!important;font-family:'Cairo',sans-serif">🎓 DONIA MIND — المعلم الذكي</h1>
+    <h1>DONIA MIND — المعلم الذكي</h1>
     <div class="donia-robot-wrap" aria-hidden="true">
-      <div class="donia-robot" title="مساعدك التربوي الذكي">
-        <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
-          <rect x="15" y="18" width="50" height="44" rx="14" fill="#d5f5e3" stroke="#145a32" stroke-width="2.5"/>
-          <line x1="40" y1="18" x2="40" y2="8" stroke="#c0392b" stroke-width="3" stroke-linecap="round"/>
-          <circle cx="40" cy="6" r="4" fill="#c0392b">
-            <animate attributeName="r" values="4;5.5;4" dur="1.6s" repeatCount="indefinite"/>
-            <animate attributeName="opacity" values="1;.55;1" dur="1.6s" repeatCount="indefinite"/>
-          </circle>
-          <circle cx="31" cy="36" r="6" fill="#145a32"/>
-          <circle cx="49" cy="36" r="6" fill="#145a32"/>
-          <circle cx="32.5" cy="35" r="2.2" fill="#ffffff">
-            <animateTransform attributeName="transform" type="translate" values="0,0;1,0;0,0;-1,0;0,0" dur="3s" repeatCount="indefinite"/>
-          </circle>
-          <circle cx="50.5" cy="35" r="2.2" fill="#ffffff">
-            <animateTransform attributeName="transform" type="translate" values="0,0;1,0;0,0;-1,0;0,0" dur="3s" repeatCount="indefinite"/>
-          </circle>
-          <path d="M30 52 Q40 60 50 52" stroke="#c0392b" stroke-width="3" fill="none" stroke-linecap="round">
-            <animate attributeName="d" values="M30 52 Q40 60 50 52;M30 50 Q40 58 50 50;M30 52 Q40 60 50 52" dur="2.5s" repeatCount="indefinite"/>
-          </path>
-          <line x1="23" y1="28" x2="23" y2="46" stroke="rgba(20,90,50,.25)" stroke-width="1.2" stroke-dasharray="3 2"/>
-          <line x1="57" y1="28" x2="57" y2="46" stroke="rgba(20,90,50,.25)" stroke-width="1.2" stroke-dasharray="3 2"/>
-          <ellipse cx="40" cy="68" rx="18" ry="4.5" fill="rgba(39,174,96,.25)"/>
+      <div class="donia-robot" title="مساعدك التربوي">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <rect x="12" y="14" width="40" height="36" rx="10" fill="#ccfbf1" stroke="#0d9488" stroke-width="2"/>
+          <circle cx="26" cy="30" r="5" fill="#0f766e"/>
+          <circle cx="38" cy="30" r="5" fill="#0f766e"/>
+          <circle cx="26.5" cy="29.5" r="1.5" fill="#ecfeff"/>
+          <circle cx="38.5" cy="29.5" r="1.5" fill="#ecfeff"/>
+          <path d="M24 42 Q32 48 40 42" stroke="#0f766e" stroke-width="2" fill="none" stroke-linecap="round"/>
+          <rect x="28" y="6" width="8" height="10" rx="2" fill="#5eead4"/>
+          <ellipse cx="32" cy="54" rx="14" ry="4" fill="rgba(45,212,191,.35)"/>
         </svg>
       </div>
     </div>
-    <p style="font-family:'Cairo',sans-serif;font-weight:600">
-      منصة تعليمية للمنظومة الجزائرية · مذكرات · اختبارات · تنقيط · تحليل · تصحيح
-    </p>
+    <p>منصة تعليمية للمنظومة الجزائرية · مذكرات · اختبارات · تنقيط · تحليل · تصحيح</p>
 </div>
 """, unsafe_allow_html=True)
 
-st.markdown(
-    f'<div class="welcome-banner">🌟 {WELCOME_MESSAGE_AR}</div>',
-    unsafe_allow_html=True
-)
-
-# Render floating assistant
-render_floating_assistant()
-
 # ═══════════════════════════════════════════════════════════
-# TABS (Preserved from original)
+# TABS
 # ═══════════════════════════════════════════════════════════
 (tab_plan, tab_exam, tab_grade, tab_report,
  tab_ex, tab_correct, tab_archive, tab_stats) = st.tabs([
@@ -2080,7 +1123,7 @@ render_floating_assistant()
 branch_txt = f" – {branch}" if branch else ""
 
 # ══════════════════════════════════════════════════════════
-# TAB 1 — مذكرة الدرس (Enhanced with Dual-LLM)
+# TAB 1 — مذكرة الدرس
 # ══════════════════════════════════════════════════════════
 with tab_plan:
     st.markdown("### 📝 إعداد المذكرة وفق الصيغة الرسمية الجزائرية")
@@ -2092,30 +1135,29 @@ with tab_plan:
 
     pm1, pm2 = st.columns(2)
     with pm1:
-        plan_lesson = st.text_input("📝 عنوان الدرس / المورد المعرفي:", key="plan_lesson",
+        plan_lesson  = st.text_input("📝 عنوان الدرس / المورد المعرفي:", key="plan_lesson",
                                       placeholder="مثال: القاسم المشترك الأكبر لعددين طبيعيين")
         plan_chapter = st.text_input("📚 الباب / الوحدة:", key="plan_chapter",
                                       placeholder="مثال: الباب الأول – الأعداد الطبيعية")
-        plan_domain = st.selectbox("🗂️ الميدان:",
+        plan_domain  = st.selectbox("🗂️ الميدان:",
                                      ["أنشطة عددية", "أنشطة جبرية", "أنشطة هندسية",
                                       "أنشطة إحصائية", "ميدان عام"], key="plan_domain")
-        plan_dur = st.selectbox("⏱️ مدة الحصة:",
+        plan_dur     = st.selectbox("⏱️ مدة الحصة:",
                                      ["50 دقيقة", "1 ساعة", "1.5 ساعة", "2 ساعة"],
                                      key="plan_dur")
     with pm2:
         plan_session = st.selectbox("نوع الحصة:",
                                      ["درس نظري", "أعمال موجهة", "أعمال تطبيقية",
                                       "تقييم تشخيصي", "دعم وعلاج"], key="plan_session")
-        plan_prereq = st.text_area("📌 المكتسبات القبلية:", key="plan_prereq", height=70,
+        plan_prereq  = st.text_area("📌 المكتسبات القبلية:", key="plan_prereq", height=70,
                                      placeholder="مثال: القسمة الإقليدية، قواسم عدد طبيعي...")
-        plan_tools = st.text_input("🛠️ الوسائل والأدوات:", key="plan_tools",
+        plan_tools   = st.text_input("🛠️ الوسائل والأدوات:", key="plan_tools",
                                       value="الكتاب المدرسي، المنهاج، الوثيقة المرافقة، دليل الأستاذ، السبورة")
-        plan_notes = st.text_area("📌 ملاحظات خاصة:", key="plan_notes", height=70,
+        plan_notes   = st.text_area("📌 ملاحظات خاصة:", key="plan_notes", height=70,
                                      placeholder="توجيهات خاصة بالفوج...")
-        use_arcee_validation = st.checkbox("🔍 تفعيل التحقق من المنهاج (Arcee)", value=True, key="plan_validate")
 
     if st.button("📝 توليد المذكرة الكاملة بالذكاء الاصطناعي", key="btn_gen_plan"):
-        if not GROQ_API_KEY:
+        if not api_key:
             st.warning("⚠️ أضف GROQ_API_KEY في متغيرات البيئة لإكمال التوليد.")
         elif not plan_lesson.strip():
             st.warning("⚠️ أدخل عنوان الدرس / المورد المعرفي لإكمال المذكرة.")
@@ -2163,19 +1205,10 @@ with tab_plan:
 ## نقد ذاتي
 [ملاحظات بيداغوجية لما بعد الحصة]"""
 
-            with st.spinner("📝 جاري إعداد المذكرة..."):
+            with st.spinner("📝 جاري إعداد المذكرة…"):
                 try:
-                    # Dual-LLM generation
-                    plan_text, validation_report = dual_llm_generate(
-                        prompt, subject, grade, validate=use_arcee_validation
-                    )
-                    
-                    if validation_report.get("error"):
-                        st.warning(f"⚠️ {validation_report['error']}")
-                    
-                    if validation_report.get("validated"):
-                        st.success("✅ تم التحقق من المحتوى بواسطة Arcee")
-                    
+                    llm = get_llm(model_name, api_key)
+                    plan_text = call_llm(llm, prompt)
                     render_with_latex(plan_text)
 
                     def extract_section(text, marker):
@@ -2189,12 +1222,12 @@ with tab_plan:
                         "session_type": plan_session, "duration": plan_dur,
                         "subject": subject,
                         "duration_t": "5 د", "duration_b": "25 د", "duration_r": "15 د",
-                        "competency": extract_section(plan_text, "مستوى من الكفاءة"),
-                        "intro": extract_section(plan_text, "مرحلة التهيئة"),
-                        "build": extract_section(plan_text, "أنشطة بناء الموارد"),
-                        "reinvest": extract_section(plan_text, "مرحلة إعادة الاستثمار"),
-                        "eval": extract_section(plan_text, "التقويم والإرشادات"),
-                        "homework": extract_section(plan_text, "الواجب المنزلي"),
+                        "competency":    extract_section(plan_text, "مستوى من الكفاءة"),
+                        "intro":         extract_section(plan_text, "مرحلة التهيئة"),
+                        "build":         extract_section(plan_text, "أنشطة بناء الموارد"),
+                        "reinvest":      extract_section(plan_text, "مرحلة إعادة الاستثمار"),
+                        "eval":          extract_section(plan_text, "التقويم والإرشادات"),
+                        "homework":      extract_section(plan_text, "الواجب المنزلي"),
                         "self_critique": extract_section(plan_text, "نقد ذاتي"),
                         "prerequisites": plan_prereq, "tools": plan_tools,
                     }
@@ -2207,7 +1240,7 @@ with tab_plan:
                          plan_text, datetime.now().strftime("%Y-%m-%d %H:%M")))
                     st.success("✅ تم حفظ المذكرة")
 
-                    d1, d2, d3 = st.columns(3)
+                    d1, d2 = st.columns(2)
                     with d1:
                         st.download_button("📥 تحميل نص",
                                            plan_text.encode("utf-8-sig"),
@@ -2218,16 +1251,6 @@ with tab_plan:
                         st.download_button("📄 تحميل PDF (النموذج الرسمي)", pdf_p,
                                            f"مذكرة_{plan_lesson}.pdf", "application/pdf",
                                            key="dl_plan_pdf")
-                    with d3:
-                        if _DOCX_AVAILABLE:
-                            docx_p = generate_lesson_plan_docx(plan_data)
-                            st.download_button("📝 تحميل Word (.docx)", docx_p,
-                                               f"مذكرة_{plan_lesson}.docx",
-                                               "application/vnd.openxmlformats-officedocument"
-                                               ".wordprocessingml.document",
-                                               key="dl_plan_docx")
-                        else:
-                            st.caption("⚠️ python-docx غير مثبت")
                 except ValueError as err:
                     st.warning(f"⚠️ تعذر معالجة بيانات المذكرة (ValueError). "
                                f"تأكد من إكمال الحقول الأساسية. التفاصيل: {err}")
@@ -2236,7 +1259,7 @@ with tab_plan:
                                f"تحقق من الاتصال ومن مفتاح Groq. التفاصيل: {err}")
 
 # ══════════════════════════════════════════════════════════
-# TAB 2 — توليد اختبار (Enhanced with Dual-LLM)
+# TAB 2 — توليد اختبار
 # ══════════════════════════════════════════════════════════
 with tab_exam:
     st.markdown("### 📄 توليد ورقة الاختبار وفق النموذج الجزائري الرسمي")
@@ -2255,26 +1278,25 @@ with tab_exam:
                                       ["ساعة واحدة", "ساعتان", "ثلاث ساعات"],
                                       key="exam_dur")
     with ex2:
-        exam_theme = st.text_input("محاور الاختبار:", key="exam_theme",
+        exam_theme  = st.text_input("محاور الاختبار:", key="exam_theme",
                                      placeholder="مثال: الجمل, الدوال الخطية, الأعداد الناطقة")
         exam_points = st.text_input("نقاط التمارين:", value="3,3,3,3,8", key="exam_pts",
                                      help="مثال: 3,3,3,3,8 (4 تمارين + وضعية إدماجية)")
     with ex3:
-        exam_difficulty = st.select_slider("مستوى الصعوبة:",
+        exam_difficulty   = st.select_slider("مستوى الصعوبة:",
                                               ["سهل", "متوسط", "صعب", "مستوى الشهادة"],
                                               key="exam_diff")
         include_integrate = st.checkbox("إضافة وضعية إدماجية", value=True,
                                          key="exam_integrate")
-        use_arcee_validate = st.checkbox("🔍 التحقق من المنهاج (Arcee)", value=True, key="exam_validate")
 
     exam_notes = st.text_area("ملاحظات وتوجيهات:", key="exam_notes",
                                placeholder="مثلاً: التركيز على الأعداد الناطقة والجذور التربيعية...")
 
     if st.button("🚀 توليد ورقة الاختبار", key="btn_gen_exam"):
-        if not GROQ_API_KEY:
+        if not api_key:
             st.error("⚠️ أضف GROQ_API_KEY")
         else:
-            pts = exam_points.split(",")
+            pts      = exam_points.split(",")
             pts_desc = " + ".join([f"تمرين {i+1}: {p.strip()} نقاط"
                                    for i, p in enumerate(pts[:4])])
             integrate_txt = (f"+ وضعية إدماجية: {pts[4].strip() if len(pts) > 4 else '8'} نقاط"
@@ -2325,16 +1347,10 @@ with tab_exam:
 ) + """
 """
 
-            with st.spinner("📄 جاري توليد الاختبار..."):
+            with st.spinner("📄 جاري توليد الاختبار…"):
                 try:
-                    # Dual-LLM generation with validation
-                    exam_content, validation_report = dual_llm_generate(
-                        prompt, subject, grade, validate=use_arcee_validate
-                    )
-                    
-                    if validation_report.get("validated"):
-                        st.success("✅ تم التحقق من المحتوى بواسطة Arcee")
-                    
+                    llm          = get_llm(model_name, api_key)
+                    exam_content = call_llm(llm, prompt)
                     st.markdown(
                         f'<div class="feature-card"><h4>📄 {subject} | '
                         f'{grade}{branch_txt} | {exam_semester} | '
@@ -2355,7 +1371,7 @@ with tab_exam:
                         "subject": subject, "duration": exam_duration,
                         "content": exam_content,
                     }
-                    d1, d2, d3 = st.columns(3)
+                    d1, d2 = st.columns(2)
                     with d1:
                         st.download_button("📥 تحميل نص",
                                            exam_content.encode("utf-8-sig"),
@@ -2366,22 +1382,12 @@ with tab_exam:
                         st.download_button("📄 تحميل PDF (النموذج الرسمي)", pdf_e,
                                            f"اختبار_{subject}_{exam_semester}.pdf",
                                            "application/pdf", key="dl_exam_pdf")
-                    with d3:
-                        if _DOCX_AVAILABLE:
-                            docx_e = generate_exam_docx(exam_pdf_data)
-                            st.download_button("📝 تحميل Word (.docx)", docx_e,
-                                               f"اختبار_{subject}_{exam_semester}.docx",
-                                               "application/vnd.openxmlformats-officedocument"
-                                               ".wordprocessingml.document",
-                                               key="dl_exam_docx")
-                        else:
-                            st.caption("⚠️ python-docx غير مثبت")
                 except Exception as err:
                     st.markdown(f'<div class="error-box">❌ {err}</div>',
                                 unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════
-# TAB 3 — دفتر التنقيط (Enhanced with Multi-Sheet Export)
+# TAB 3 — دفتر التنقيط
 # ══════════════════════════════════════════════════════════
 with tab_grade:
     st.markdown("### 📊 دفتر التنقيط الرسمي")
@@ -2395,21 +1401,9 @@ with tab_grade:
         gr_file = st.file_uploader("📁 ارفع ملف دفتر التنقيط:",
                                     type=["xlsx", "xls"], key="gr_upload")
         if gr_file:
-            _sheet_names = list_excel_sheet_names(gr_file)
-            gr_merge = st.checkbox(
-                "دمج جميع أوراق الملف (Sheets) في قائمة واحدة",
-                value=False, key="gr_merge_all",
-                help="يفيد عند وجود عدة أقسام/أفواج في نفس الملف.")
-            gr_sel = None
-            if not gr_merge and len(_sheet_names) > 1:
-                gr_sel = st.selectbox(
-                    "اختر الورقة المراد قراءتها:", _sheet_names, key="gr_sheet_pick")
-            elif not gr_merge and len(_sheet_names) == 1:
-                gr_sel = _sheet_names[0]
-            with st.spinner("جاري قراءة الملف..."):
+            with st.spinner("جاري قراءة الملف…"):
                 try:
-                    students_data = parse_grade_book_excel(
-                        gr_file, sheet_name=gr_sel, merge_all_sheets=gr_merge)
+                    students_data = parse_grade_book_excel(gr_file)
                     st.success(f"✅ تم قراءة {len(students_data)} تلميذ")
                 except Exception as e:
                     st.error(f"خطأ في القراءة: {e}")
@@ -2418,14 +1412,13 @@ with tab_grade:
         manual_data = st.text_area("", height=200, key="grade_manual",
             placeholder="أحمد بلعيد, 15, 12, 14\nفاطمة زروق, 18, 17, 19\nعلي حمدي, 10, 8, 11")
         if manual_data.strip():
-            for idx, line in enumerate(manual_data.strip().splitlines(), 1):
+            for line in manual_data.strip().splitlines():
                 parts = [p.strip() for p in line.split(",")]
                 if len(parts) >= 4:
                     try:
                         name_parts = parts[0].split()
                         students_data.append({
-                            'id': idx,  # Start from 1
-                            'nom': name_parts[0] if name_parts else parts[0],
+                            'id': '', 'nom': name_parts[0] if name_parts else parts[0],
                             'prenom': " ".join(name_parts[1:]) if len(name_parts) > 1 else '',
                             'dob': '', 'taqwim': float(parts[1]),
                             'fard': float(parts[2]), 'ikhtibhar': float(parts[3]),
@@ -2434,41 +1427,36 @@ with tab_grade:
                         pass
             for s in students_data:
                 s['average'] = calc_average(s['taqwim'], s['fard'], s['ikhtibhar'])
-                s['apprec'] = get_appreciation(s['average'])
+                s['apprec']  = get_appreciation(s['average'])
 
     if students_data:
         gc1, gc2 = st.columns(2)
         with gc1:
             gb_class = st.text_input("اسم القسم:", placeholder="4م1", key="gb_class")
-            gb_sem = st.selectbox("الفصل:",
+            gb_sem   = st.selectbox("الفصل:",
                                      ["الفصل الأول", "الفصل الثاني", "الفصل الثالث"],
                                      key="gb_sem")
         with gc2:
             gb_subject = st.text_input("المادة:", value=subject, key="gb_subject")
-            gb_school = st.text_input("المؤسسة:", value=school_name, key="gb_school")
+            gb_school  = st.text_input("المؤسسة:", value=school_name, key="gb_school")
 
-        # DataFrame with index starting from 1
         df = pd.DataFrame([{
-            "الرقم": idx + 1,
-            "اللقب": s.get('nom', ''),
-            "الاسم": s.get('prenom', ''),
-            "الورقة": s.get('sheet_source', ''),
-            "تقويم /20": s.get('taqwim', ''),
-            "فرض /20": s.get('fard', ''),
+            "اللقب": s.get('nom', ''), "الاسم": s.get('prenom', ''),
+            "تقويم /20": s.get('taqwim', ''), "فرض /20": s.get('fard', ''),
             "اختبار /20": s.get('ikhtibhar', ''),
-            "المعدل": s.get('average', 0),
-            "التقدير": s.get('apprec', '')
-        } for idx, s in enumerate(students_data)])
+            "المعدل": s.get('average', 0), "التقدير": s.get('apprec', '')
+        } for s in students_data])
 
         st.markdown("#### 📋 جدول النتائج")
         st.dataframe(df, use_container_width=True, height=350)
 
         averages = [s['average'] for s in students_data]
-        passed = [a for a in averages if a >= 10]
+        passed   = [a for a in averages if a >= 10]
         a1, a2, a3, a4, a5 = st.columns(5)
         for col, val, lbl, clr in [
             (a1, len(students_data), "عدد التلاميذ", "#667eea"),
             (a2, f"{sum(averages)/max(len(averages),1):.2f}", "معدل القسم", "#764ba2"),
+            # FIX-4: حماية max/min على قوائم فارغة
             (a3, f"{max(averages):.2f}" if averages else "—", "أعلى معدل", "#10b981"),
             (a4, f"{min(averages):.2f}" if averages else "—", "أدنى معدل", "#ef4444"),
             (a5, f"{len(passed)}/{len(averages)}", "الناجحون", "#f59e0b"),
@@ -2489,41 +1477,14 @@ with tab_grade:
 
         dg1, dg2 = st.columns(2)
         with dg1:
-            # Multi-sheet export if multiple classes, otherwise single sheet
-            if len(set([s.get('sheet_source', gb_class) for s in students_data])) > 1:
-                # Build class data for multi-sheet export
-                classes_by_sheet = {}
-                for s in students_data:
-                    sheet = s.get('sheet_source', gb_class)
-                    if sheet not in classes_by_sheet:
-                        classes_by_sheet[sheet] = []
-                    classes_by_sheet[sheet].append(s)
-                
-                classes_data = []
-                for sheet_name, students in classes_by_sheet.items():
-                    classes_data.append({
-                        "name": sheet_name,
-                        "students": students
-                    })
-                
-                xlsx_bytes = generate_multi_sheet_grade_book(
-                    classes_data, gb_school or school_name,
-                    gb_subject or subject, gb_sem)
-                st.download_button(
-                    "📊 تحميل دفتر التنقيط (Excel - متعدد الأوراق)", xlsx_bytes,
-                    f"دفتر_الأقسام_{gb_sem}.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_grade_xlsx_multi")
-            else:
-                # FIX 1: Use the newly defined single-sheet generator
-                xlsx_bytes = generate_grade_book_excel(
-                    students_data, gb_class or "القسم",
-                    gb_subject or subject, gb_sem, gb_school or school_name)
-                st.download_button(
-                    "📊 تحميل دفتر التنقيط (Excel)", xlsx_bytes,
-                    f"دفتر_{gb_class}_{gb_sem}.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_grade_xlsx")
+            xlsx_bytes = generate_grade_book_excel(
+                students_data, gb_class or "القسم",
+                gb_subject or subject, gb_sem, gb_school or school_name)
+            st.download_button(
+                "📊 تحميل دفتر التنقيط (Excel)", xlsx_bytes,
+                f"دفتر_{gb_class}_{gb_sem}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_grade_xlsx")
         with dg2:
             if st.button("💾 حفظ في قاعدة البيانات", key="btn_save_grade"):
                 db_exec(
@@ -2536,7 +1497,7 @@ with tab_grade:
                 st.success("✅ تم الحفظ")
 
 # ══════════════════════════════════════════════════════════
-# TAB 4 — تحليل النتائج (Enhanced with Session Persistence)
+# TAB 4 — تحليل النتائج
 # ══════════════════════════════════════════════════════════
 with tab_report:
     st.markdown("### 📈 تحليل نتائج الأقسام (تقرير شامل)")
@@ -2546,29 +1507,15 @@ with tab_report:
         horizontal=True, key="rep_mode")
 
     all_classes = []
-    report_data = {}
 
     if rep_mode == "📁 رفع ملف Excel":
         rep_files = st.file_uploader(
             "📁 ارفع ملفات دفتر التنقيط (يمكن رفع عدة أقسام):",
             type=["xlsx"], accept_multiple_files=True, key="rep_upload")
-        rep_merge_sheets = st.checkbox(
-            "دمج جميع أوراق كل ملف Excel", value=False, key="rep_merge_all",
-            help="عند التفعيل تُقرأ كل الأوراق وتُدمج لكل ملف.")
-        rep_sheet_choice = None
-        if rep_files and not rep_merge_sheets:
-            _sn0 = list_excel_sheet_names(rep_files[0])
-            if len(_sn0) > 1:
-                rep_sheet_choice = st.selectbox(
-                    "الورقة المستخدمة (يُفترض تطابق أسماء الأوراق بين الملفات):",
-                    _sn0, key="rep_sheet_pick")
-            elif _sn0:
-                rep_sheet_choice = _sn0[0]
         if rep_files:
             for f in rep_files:
                 try:
-                    stus = parse_grade_book_excel(
-                        f, sheet_name=rep_sheet_choice, merge_all_sheets=rep_merge_sheets)
+                    stus = parse_grade_book_excel(f)
                     if stus:
                         cls_name = f.name.replace(".xlsx", "").replace("_", " ")
                         all_classes.append(build_class_stats(stus, cls_name))
@@ -2583,9 +1530,9 @@ with tab_report:
             parts = [p.strip() for p in line.split(",")]
             if len(parts) >= 4:
                 try:
-                    total = int(parts[3])
+                    total    = int(parts[3])
                     passed_n = int(parts[1])
-                    avg = float(parts[2])
+                    avg      = float(parts[2])
                     all_classes.append({
                         "name": parts[0], "total": total,
                         "avg": avg, "max": 20.0, "min": 0.0,
@@ -2611,7 +1558,8 @@ with tab_report:
                     pass
 
     if all_classes:
-        rep_subject = st.text_input("المادة:", value=subject, key="rep_subj")
+        # FIX-5: تعريف المتغيرات مسبقاً بدلاً من 'rep_subject' in dir()
+        rep_subject  = st.text_input("المادة:", value=subject, key="rep_subj")
         rep_semester = st.selectbox("الفصل:",
                                      ["الفصل الأول", "الفصل الثاني", "الفصل الثالث"],
                                      key="rep_sem")
@@ -2649,7 +1597,7 @@ with tab_report:
 
                 if cls.get('top5'):
                     top_df = pd.DataFrame(cls['top5'])
-                    top_df.index = range(1, len(top_df) + 1)  # Start from 1
+                    top_df.index = range(1, len(top_df) + 1)
                     st.caption("أفضل 5 تلاميذ:")
                     st.dataframe(top_df, use_container_width=True)
 
@@ -2658,12 +1606,7 @@ with tab_report:
                     st.caption("توزيع الدرجات:")
                     st.dataframe(dist_df, use_container_width=True)
 
-        # Store report data in session state for persistence
-        if "stored_report_data" not in st.session_state:
-            st.session_state.stored_report_data = None
-        
-        # FIX 3: Replace `api_key` with `GROQ_API_KEY`
-        if GROQ_API_KEY and st.button("🤖 توليد التقرير البيداغوجي بالذكاء الاصطناعي",
+        if api_key and st.button("🤖 توليد التقرير البيداغوجي بالذكاء الاصطناعي",
                                    key="btn_rep_ai"):
             summary = "\n".join([
                 f"القسم {c['name']}: معدل={safe_f(c['avg'])}, "
@@ -2683,40 +1626,22 @@ with tab_report:
 5. خطة علاجية مقترحة
 6. مقترحات للأستاذ لتطوير أدائه"""
 
-            with st.spinner("🧠 جاري التحليل البيداغوجي..."):
+            with st.spinner("🧠 جاري التحليل البيداغوجي…"):
                 try:
-                    ai_analysis, validation_report = dual_llm_generate(
-                        prompt_rep, rep_subject, grade, validate=False)
-                    
+                    llm         = get_llm(model_name, api_key)
+                    ai_analysis = call_llm(llm, prompt_rep)
                     st.markdown("---")
                     st.markdown("#### 🤖 التقرير البيداغوجي")
                     render_with_latex(ai_analysis)
-                    
                     report_data = {
                         "school": school_name, "subject": rep_subject,
                         "semester": rep_semester, "classes": all_classes,
                         "ai_analysis": ai_analysis,
                     }
-                    
-                    # Store in session state for persistence
-                    st.session_state.stored_report_data = report_data
-                    
                     pdf_rep = generate_report_pdf(report_data)
-                    r1, r2 = st.columns(2)
-                    with r1:
-                        st.download_button("📄 تحميل التقرير الكامل PDF", pdf_rep,
-                                           f"تقرير_نتائج_{rep_semester}.pdf",
-                                           "application/pdf", key="dl_report_pdf")
-                    with r2:
-                        if _DOCX_AVAILABLE:
-                            docx_rep = generate_report_docx(report_data)
-                            st.download_button("📝 تحميل Word (.docx)", docx_rep,
-                                               f"تقرير_نتائج_{rep_semester}.docx",
-                                               "application/vnd.openxmlformats-officedocument"
-                                               ".wordprocessingml.document",
-                                               key="dl_report_docx")
-                        else:
-                            st.caption("⚠️ python-docx غير مثبت")
+                    st.download_button("📄 تحميل التقرير الكامل PDF", pdf_rep,
+                                       f"تقرير_نتائج_{rep_semester}.pdf",
+                                       "application/pdf", key="dl_report_pdf")
                 except Exception as e:
                     st.error(str(e))
         else:
@@ -2724,34 +1649,13 @@ with tab_report:
                 "school": school_name, "subject": rep_subject,
                 "semester": rep_semester, "classes": all_classes, "ai_analysis": "",
             }
-            # Store in session state
-            st.session_state.stored_report_data = report_data
-            
             pdf_rep = generate_report_pdf(report_data)
-            rr1, rr2 = st.columns(2)
-            with rr1:
-                st.download_button("📄 تحميل التقرير PDF", pdf_rep,
-                                   "تقرير_نتائج.pdf", "application/pdf",
-                                   key="dl_report_pdf2")
-            with rr2:
-                if _DOCX_AVAILABLE:
-                    docx_rep2 = generate_report_docx(report_data)
-                    st.download_button("📝 تحميل Word (.docx)", docx_rep2,
-                                       "تقرير_نتائج.docx",
-                                       "application/vnd.openxmlformats-officedocument"
-                                       ".wordprocessingml.document",
-                                       key="dl_report_docx2")
-        
-        # Display stored report if available
-        if st.session_state.stored_report_data:
-            st.markdown("---")
-            st.markdown("#### 📋 التقرير المخزن")
-            if st.session_state.stored_report_data.get('ai_analysis'):
-                st.markdown(st.session_state.stored_report_data['ai_analysis'][:500] + "...")
-            st.caption("يمكنك تحميل التقرير من الأزرار أعلاه في أي وقت")
+            st.download_button("📄 تحميل التقرير PDF", pdf_rep,
+                               "تقرير_نتائج.pdf", "application/pdf",
+                               key="dl_report_pdf2")
 
 # ══════════════════════════════════════════════════════════
-# TAB 5 — توليد تمرين (Preserved with index starting from 1)
+# TAB 5 — توليد تمرين
 # ══════════════════════════════════════════════════════════
 with tab_ex:
     st.markdown("### ✏️ توليد تمرين مع الحل التفصيلي")
@@ -2772,7 +1676,7 @@ with tab_ex:
                           placeholder="أي توجيهات خاصة…", key="ex_extra")
 
     if st.button("🚀 توليد التمرين والحل التفصيلي", key="btn_gen_ex"):
-        if not GROQ_API_KEY:
+        if not api_key:
             st.error("⚠️ أضف GROQ_API_KEY")
         elif not lesson.strip():
             st.warning("⚠️ أدخل عنوان الدرس")
@@ -2796,8 +1700,7 @@ with tab_ex:
 [توجيهات بيداغوجية]"""
             with st.spinner("🧠 جاري التوليد…"):
                 try:
-                    llm = get_llm(model_name, GROQ_API_KEY)
-                    # FIX 1: Use call_llm instead of undefined function
+                    llm      = get_llm(model_name, api_key)
                     res_text = call_llm(llm, prompt)
                     render_with_latex(res_text)
                     db_exec(
@@ -2822,7 +1725,7 @@ with tab_ex:
                                 unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════
-# TAB 6 — تصحيح أوراق (Preserved with camera error handling)
+# TAB 6 — تصحيح أوراق
 # ══════════════════════════════════════════════════════════
 with tab_correct:
     st.markdown("### ✅ تصحيح أوراق الاختبار")
@@ -2834,9 +1737,9 @@ with tab_correct:
     cc1, cc2 = st.columns(2)
     with cc1:
         student_name = st.text_input("اسم الطالب:", key="corr_name", placeholder="اختياري")
-        exam_subj = st.text_input("المادة:", value=subject, key="corr_subject")
+        exam_subj    = st.text_input("المادة:", value=subject, key="corr_subject")
     with cc2:
-        total_marks = st.number_input("العلامة الكاملة:", 10, 100, 20, key="corr_total")
+        total_marks   = st.number_input("العلامة الكاملة:", 10, 100, 20, key="corr_total")
         correct_style = st.selectbox("أسلوب التصحيح:",
                                       ["تصحيح شامل مع تعليقات", "تصحيح مختصر",
                                        "تحديد الأخطاء فقط"], key="corr_style")
@@ -2849,12 +1752,7 @@ with tab_correct:
         st.markdown("**معاينة الصورة قبل المعالجة**")
         img_col1, img_col2 = st.columns(2)
         with img_col1:
-            # FIX 4: Camera input with error handling
-            try:
-                cam_shot = st.camera_input("📷 الكاميرا المباشرة", key="corr_camera")
-            except Exception as cam_err:
-                st.error(f"⚠️ تعذر الوصول إلى الكاميرا: {cam_err}. تأكد من منح التطبيق صلاحية الوصول إلى الكاميرا (HTTPS مطلوب).")
-                cam_shot = None
+            cam_shot = st.camera_input("📷 الكاميرا المباشرة", key="corr_camera")
         with img_col2:
             up_img = st.file_uploader("📁 رفع صورة (PNG / JPG / JPEG / WEBP)",
                                        type=["png", "jpg", "jpeg", "webp"],
@@ -2887,7 +1785,7 @@ with tab_correct:
         "📄 إجابة الطالب:", height=ta_h, key="corr_student_ans", placeholder=ph)
 
     if st.button("✅ تصحيح الإجابة", key="btn_correct"):
-        if not GROQ_API_KEY:
+        if not api_key:
             st.error("⚠️ أضف GROQ_API_KEY")
         elif not student_answer.strip():
             st.warning("⚠️ أدخل إجابة الطالب")
@@ -2912,10 +1810,10 @@ with tab_correct:
 
             with st.spinner("🔍 جاري التصحيح…"):
                 try:
-                    llm = get_llm(model_name, GROQ_API_KEY)
+                    llm        = get_llm(model_name, api_key)
                     correction = call_llm(llm, prompt_corr)
                     render_with_latex(correction)
-                    m = re.search(r'(\d+(?:\.\d+)?)\s*/' + str(total_marks), correction)
+                    m  = re.search(r'(\d+(?:\.\d+)?)\s*/' + str(total_marks), correction)
                     gv = float(m.group(1)) if m else 0.0
                     db_exec(
                         "INSERT INTO corrections "
@@ -2935,7 +1833,7 @@ with tab_correct:
                                 unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════
-# TAB 7 — الأرشيف (Preserved with index starting from 1)
+# TAB 7 — الأرشيف
 # ══════════════════════════════════════════════════════════
 with tab_archive:
     st.markdown("### 🗄️ الأرشيف الشامل")
@@ -2949,7 +1847,7 @@ with tab_archive:
             "ORDER BY created_at DESC",
             (f"%{search_q}%", f"%{search_q}%"), fetch=True) or []
         st.caption(f"النتائج: {len(exercises)}")
-        for idx, ex in enumerate(exercises, 1):
+        for ex in exercises:
             ex_id, lv, gr, br, sub, les, xt, diff, cont, created = ex
             with st.expander(f"📚 {les} | {sub} | {gr} | {diff} | 🕒 {created}"):
                 st.markdown(f'<div class="result-box">{cont[:400]}…</div>',
@@ -2967,10 +1865,12 @@ with tab_archive:
                         db_exec("DELETE FROM exercises WHERE id=?", (ex_id,))
                         st.rerun()
 
+    # ── FIX-1: أرشيف المذكرات — unpack مُحصَّن تماماً ──────────────
     with arch_tabs[1]:
         plans = db_exec("SELECT * FROM lesson_plans ORDER BY created_at DESC",
                         fetch=True) or []
         for p in plans:
+            # FIX-1: حماية شاملة ضد ValueError/TypeError عند unpacking
             try:
                 if p is None or not isinstance(p, (tuple, list)):
                     st.warning("⚠️ سجل مذكرة تالف — تم تخطيه.")
@@ -2980,14 +1880,15 @@ with tab_archive:
                         f"⚠️ سجل مذكرة غير مكتمل ({len(p)} حقول) — "
                         f"تم تخطيه. أعد حفظ المذكرة.")
                     continue
-                row = list(p) + [None] * max(0, 9 - len(p))
+                # استخراج آمن مع [:9] وقيم افتراضية
+                row = list(p) + [None] * max(0, 9 - len(p))  # padding حتى 9 عناصر
                 pid, lv, gr, sub, les, dom, dur, cont, created = row[:9]
-                les = "بدون عنوان" if les is None else str(les)
-                sub = "" if sub is None else str(sub)
-                gr = "" if gr is None else str(gr)
-                dom = "" if dom is None else str(dom)
-                cont = "" if cont is None else str(cont)
-                created = "" if created is None else str(created)
+                les     = "بدون عنوان" if les     is None else str(les)
+                sub     = ""           if sub     is None else str(sub)
+                gr      = ""           if gr      is None else str(gr)
+                dom     = ""           if dom     is None else str(dom)
+                cont    = ""           if cont    is None else str(cont)
+                created = ""           if created is None else str(created)
             except ValueError as ve:
                 st.warning(f"⚠️ تعذر قراءة سجل مذكرة (ValueError): {ve}")
                 continue
@@ -3043,7 +1944,7 @@ with tab_archive:
                          use_container_width=True)
 
 # ══════════════════════════════════════════════════════════
-# TAB 8 — إحصائيات (Preserved)
+# TAB 8 — إحصائيات
 # ══════════════════════════════════════════════════════════
 with tab_stats:
     total_ex, plans_cnt, exams_cnt, corr_cnt = get_stats()
@@ -3051,10 +1952,10 @@ with tab_stats:
 
     s1, s2, s3, s4 = st.columns(4)
     for col, val, lbl, clr in [
-        (s1, total_ex, "التمارين المولّدة", "#667eea"),
-        (s2, plans_cnt, "المذكرات المعدّة", "#764ba2"),
-        (s3, exams_cnt, "الاختبارات المولّدة", "#10b981"),
-        (s4, corr_cnt, "الأوراق المصحّحة", "#f59e0b"),
+        (s1, total_ex,  "التمارين المولّدة",   "#667eea"),
+        (s2, plans_cnt, "المذكرات المعدّة",     "#764ba2"),
+        (s3, exams_cnt, "الاختبارات المولّدة",  "#10b981"),
+        (s4, corr_cnt,  "الأوراق المصحّحة",    "#f59e0b"),
     ]:
         with col:
             st.markdown(
@@ -3092,48 +1993,16 @@ with tab_stats:
     st.markdown("### ☁️ حالة الربط")
     c1, c2 = st.columns(2)
     with c1:
-        if GROQ_API_KEY:
-            st.markdown('<div class="success-box">✅ Groq: متصل</div>',
+        if drive_json and drive_json.strip().startswith("{"):
+            st.markdown('<div class="success-box">✅ Google Drive: متصل</div>',
                         unsafe_allow_html=True)
         else:
-            st.markdown('<div class="error-box">❌ Groq: غير متصل</div>',
+            st.markdown('<div class="error-box">❌ Google Drive: غير متصل</div>',
                         unsafe_allow_html=True)
     with c2:
-        arcee_connected = test_arcee_connection()
-        if arcee_connected:
-            st.markdown('<div class="success-box">✅ Arcee: متصل</div>',
+        if firebase_json and firebase_json.strip().startswith("{"):
+            st.markdown('<div class="success-box">✅ Firebase: متصل</div>',
                         unsafe_allow_html=True)
         else:
-            st.markdown('<div class="error-box">❌ Arcee: غير متصل</div>',
+            st.markdown('<div class="error-box">❌ Firebase: غير متصل</div>',
                         unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════
-# FOOTER
-# ═══════════════════════════════════════════════════════════
-st.markdown(
-    f"""
-<div class="donia-ip-footer">
-  <div style="margin-bottom:.5rem;font-size:1rem">
-    {COPYRIGHT_FOOTER_AR}
-  </div>
-  <div class="donia-footer-social">
-    <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer">
-      📱 واتساب
-    </a>
-    <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer">
-      📘 فيسبوك
-    </a>
-    <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer">
-      ✈️ تيليغرام
-    </a>
-    <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer">
-      💼 لينكدإن
-    </a>
-  </div>
-  <div style="margin-top:.4rem;font-size:.78rem;color:#888">
-    DONIA LABS TECH — منصة المعلم الجزائري الذكي | v3.0
-  </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
