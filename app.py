@@ -3133,17 +3133,7 @@ st.markdown(
   <div style="margin-top:.4rem;font-size:.78rem;color:#888">
     DONIA LABS TECH — منصة المعلم الجزائري الذكي | v3.0
   </div>
-  import arcee
-
-# 1. إعداد الاتصال باستخدام المفتاح المخزن في Secrets
-client = arcee.Arcee(arcee_api_key=st.secrets["ARCEE_API_KEY"])
-
-# 2. استدعاء نموذج DoniaLabstech مباشرة
-response = client.generate(model="DoniaLabstech", prompt="مرحباً، كيف يمكنني مساعدتك اليوم؟")
-
-# 3. عرض النتيجة في واجهة تطبيق Donia Labstech
-st.info("رد نموذج Arcee (DoniaLabstech):")
-st.write(response)
+</div>
 """,
     unsafe_allow_html=True,
 )
