@@ -1631,8 +1631,9 @@ section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
 }
 </style>
 """, unsafe_allow_html=True)  
+with st.sidebar:
     st.markdown("## ⚙️ الإعدادات العامة")
-    
+    # ... (your existing sidebar content)    
     # Real‑time connectivity dashboard
     st.markdown("### 🔌 حالة الاتصال")
     col1, col2 = st.columns(2)
