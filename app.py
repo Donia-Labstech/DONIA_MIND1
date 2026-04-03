@@ -1700,10 +1700,17 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("**تواصل — DONIA LABS TECH**")
-st.markdown(
-    f"""...""",
-    unsafe_allow_html=True,
-with st.sidebar:
+    st.markdown(
+        f"""
+        <div class="donia-social">
+          <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer" title="WhatsApp">\U0001F4F1 WA</a>
+          <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer" title="LinkedIn">\U0001F4BC in</a>
+          <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook">\U0001F4D6 f</a>
+          <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer" title="Telegram">✈️ TG</a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )   # ← Make sure this closing parenthesis existswith st.sidebar:
     # Logo
     _logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_donia.jpg")
     if os.path.isfile(_logo_path):
