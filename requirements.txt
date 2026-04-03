@@ -1,38 +1,49 @@
-# الأساسيات وواجهة المستخدم
+# ═══════════════════════════════════════════════════════════
+# DONIA MIND V4.0 - OFFICIAL REQUIREMENTS (DUAL-AI EDITION)
+# ═══════════════════════════════════════════════════════════
+
+# الأساسيات وواجهة المستخدم (Core Framework)
 streamlit>=1.32.0
 python-dotenv>=1.0.0
 requests>=2.31.0
 
-# الذكاء الاصطناعي ومعالجة اللغات
+# الذكاء الاصطناعي والبحث الذكي (AI & Search RAG)
 groq>=0.4.0
 openai>=1.0.0
 langchain-groq>=0.1.3
+tavily-python              # للبحث عن الصور والمحتوى المباشر من الإنترنت
 
-# قواعد البيانات والربط السحابي
-firebase-admin>=6.2.0
-google-api-python-client>=2.100.0
-google-auth-httplib2>=0.1.0
-google-auth-oauthlib>=1.0.0
+# أدوات الوسائط المتعددة والرسم (Multimedia & Interactive Tools)
+streamlit-mic-recorder    # لتفعيل الميكروفون (تحويل الصوت لنص)
+streamlit-drawable-canvas    # لأداة رسم المنحنيات والأشكال الهندسية
 
-# معالجة البيانات والجداول والرسوم البيانية
+# معالجة اللغات والتعرف التلقائي (NLP & Detection)
+langdetect                 # للتعرف التلقائي على لغة المعلم (عربي/فرنسي/إنجليزي)
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
+
+# معالجة البيانات والرسوم البيانية (Data & Analytics)
 pandas>=2.0.0
 openpyxl>=3.1.2
 xlsxwriter>=3.1.0
 xlrd>=2.0.1
 plotly>=5.18.0
 
-# معالجة الصور و الـ OCR ورموز الاستجابة السريعة
+# معالجة الصور و الـ OCR ورموز الاستجابة (Vision)
 Pillow>=10.0.0
 pytesseract>=0.3.10
 qrcode[pil]>=7.4.2
 
-# معالجة وتوليد الملفات (PDF, Word, LXML)
-reportlab>=4.0.0
+# توليد المستندات والـ PDF (Document Engineering)
+fpdf2                      # المحرك الأساسي لدعم الخطوط العربية (منع المربعات)
+reportlab>=4.0.0          # الحفاظ على التوافق مع التقارير القديمة
 python-docx>=1.1.0
 lxml>=4.9.0
 pdfplumber>=0.10.0
 PyPDF2>=3.0.0
 
-# دعم اللغة العربية
-arabic-reshaper>=3.0.0
-python-bidi>=0.4.2
+# قواعد البيانات والربط السحابي (Cloud Backend)
+firebase-admin>=6.2.0
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.1.0
+google-auth-oauthlib>=1.0.0
