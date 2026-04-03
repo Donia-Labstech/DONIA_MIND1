@@ -1,46 +1,38 @@
-# الأساسيات (تم تثبيت الإصدار الذي كان يعمل لديك)
-streamlit>=1.28.0
+# الأساسيات وواجهة المستخدم
+streamlit>=1.32.0
 python-dotenv>=1.0.0
 requests>=2.31.0
 
-# الذكاء الاصطناعي (تم دمج الإصدارات المتوافقة)
-langchain-groq>=0.1.0
+# الذكاء الاصطناعي ومعالجة اللغات
 groq>=0.4.0
 openai>=1.0.0
-tavily-python>=0.3.0
-arcee-python>=0.1.0
+langchain-groq>=0.1.3
 
-# الوسائط والتفاعل
-streamlit-mic-recorder>=0.1.0
-streamlit-drawable-canvas
-
-# معالجة اللغات (ضرورية للعربية)
-arabic-reshaper>=3.0.0
-python-bidi>=0.4.2
-langdetect>=1.0.9
-
-# البيانات والرسوم
-pandas>=2.0.0
-openpyxl>=3.1.0
-xlsxwriter>=3.1.0
-xlrd>=2.0.1
-plotly>=5.17.0
-
-# الصور و OCR
-Pillow>=10.0.0
-pytesseract>=0.3.10
-qrcode[pil]>=7.4.0
-
-# المستندات و PDF
-fpdf2>=2.7.0
-reportlab>=4.0.0
-python-docx>=0.8.11
-pdfplumber>=0.10.0
-PyPDF2>=3.0.0
-lxml>=4.9.0
-
-# الخدمات السحابية
+# قواعد البيانات والربط السحابي
 firebase-admin>=6.2.0
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.1.0
 google-auth-oauthlib>=1.0.0
+
+# معالجة البيانات والجداول والرسوم البيانية
+pandas>=2.0.0
+openpyxl>=3.1.2
+xlsxwriter>=3.1.0
+xlrd>=2.0.1
+plotly>=5.18.0
+
+# معالجة الصور و الـ OCR ورموز الاستجابة السريعة
+Pillow>=10.0.0
+pytesseract>=0.3.10
+qrcode[pil]>=7.4.2
+
+# معالجة وتوليد الملفات (PDF, Word, LXML)
+reportlab>=4.0.0
+python-docx>=1.1.0
+lxml>=4.9.0
+pdfplumber>=0.10.0
+PyPDF2>=3.0.0
+
+# دعم اللغة العربية
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
