@@ -1700,9 +1700,10 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("**تواصل — DONIA LABS TECH**")
-    st.markdown(
-        f"""
-        <div class="donia-social">
+st.markdown(
+    f"""...""",
+    unsafe_allow_html=True,
+)        <div class="donia-social">
 st.markdown(
     f"""
     <div class="donia-social">
