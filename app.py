@@ -1703,21 +1703,106 @@ with st.sidebar:
 st.markdown(
     f"""...""",
     unsafe_allow_html=True,
-)        <div class="donia-social">
-st.markdown(
-    f"""
-    <div class="donia-social">
-      <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer" title="WhatsApp">\U0001F4F1 WA</a>
-      <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer" title="LinkedIn">\U0001F4BC in</a>
-      <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook">\U0001F4D6 f</a>
-      <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer" title="Telegram">✈️ TG</a>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
- st.markdown(
-    f"""
-<div class="donia-ip-footer">
+with st.sidebar:
+    # Logo
+    _logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_donia.jpg")
+    if os.path.isfile(_logo_path):
+        st.image(_logo_path, width=220, caption="DONIA LABS TECH v4.0")
+    
+    # QR Code
+    try:
+        import qrcode
+        from io import BytesIO
+        qr = qrcode.QRCode(version=1, box_size=4, border=2)
+        qr.add_data(APP_URL)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="#145a32", back_color="white")
+        qr_buf = BytesIO()
+        qr_img.save(qr_buf, format="PNG")
+        qr_buf.seek(0)
+        st.image(qr_buf, caption="مسح للوصول السريع", width=120)
+    except Exception:
+        st.caption("📱 مسح للوصول للتطبيق")
+    
+    st.markdown("## ⚙️ الإعدادات العامة")
+    
+    # Real‑time connectivity dashboard
+    st.markdown("### 🔌 حالة الاتصال")
+    col1, col2 = st.columns(2)
+    with col1:
+        if GROQ_API_KEY:
+            st.markdown('<div class="success-box" style="text-align:center">✅ Groq: متصل</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="error-box" style="text-align:center">❌ Groq: غير متصل</div>', unsafe_allow_html=True)
+    with col2:
+        arcee_connected = False
+        if _ARCEE_AVAILABLE and ARCEE_API_KEY:
+            try:
+                arcee_client = Arcee(api_key=ARCEE_API_KEY)
+                arcee_connected = arcee_client is not None
+            except:
+                pass
+        if arcee_connected:
+            st.markdown('<div class="success-box" style="text-align:center">✅ Arcee: متصل</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="error-box" style="text-align:center">❌ Arcee: غير متصل</div>', unsafe_allow_html=True)
+    
+    # Audio input (microphone)
+    st.markdown("### 🎤 إدخال صوتي")
+    if MIC_AVAILABLE:
+        audio_bytes = mic_recorder(start_prompt="🎙️ اضغط للتسجيل", stop_prompt="⏹️ إيقاف", key="mic_recorder")
+        if audio_bytes:
+            with st.spinner("جاري تحويل الصوت إلى نص..."):
+                transcribed = audio_to_text(audio_bytes)
+                if transcribed:
+                    st.success(f"تم التعرف: {transcribed[:100]}...")
+                    st.session_state["voice_text"] = transcribed
+                    st.info("يمكنك استخدام هذا النص في أي حقل إدخال أدناه.")
+                else:
+                    st.error("لم يتم التعرف على الصوت. تأكد من وضوح التسجيل.")
+    else:
+        st.warning("⚠️ streamlit-mic-recorder غير مثبت. لتثبيت: pip install streamlit-mic-recorder")
+    
+    # Web search toggle (RAG)
+    enable_web_search = st.checkbox("🌐 تمكين البحث عبر الإنترنت (Tavily)", value=False, key="global_web_search")
+    if enable_web_search and not TAVILY_API_KEY:
+        st.error("مفتاح Tavily غير موجود. أضف TAVILY_API_KEY في secrets.")
+    
+    # Rest of original sidebar (level, grade, branch, subject, school info)
+    level = st.selectbox("🏫 الطور التعليمي", list(CURRICULUM.keys()))
+    info = CURRICULUM[level]
+    grade = st.selectbox("📚 السنة الدراسية", info["grades"])
+    branch = None
+    if info["branches"] and grade in info["branches"]:
+        branch = st.selectbox("🎯 الشعبة", list(info["branches"][grade].keys()))
+    if info["subjects"]:
+        subj_list = info["subjects"].get(grade) or info["subjects"].get("_default", [])
+    elif info["branches"] and grade in info["branches"] and branch:
+        subj_list = info["branches"][grade][branch]
+    else:
+        subj_list = []
+    subject = (st.selectbox("📖 المادة", subj_list) if subj_list else st.text_input("📖 المادة", key="sb_subject"))
+    
+    st.markdown("---")
+    st.markdown("**🏫 معلومات المؤسسة**")
+    school_name = st.text_input("اسم المتوسطة / الثانوية", placeholder="متوسطة الشهيد...", key="school_name")
+    teacher_name = st.text_input("اسم الأستاذ(ة)", placeholder="الأستاذ(ة)...", key="teacher_name")
+    wilaya = st.text_input("الولاية", placeholder="الجزائر...", key="wilaya")
+    school_year = st.text_input("السنة الدراسية", value="2025/2026", key="syear")
+    
+    st.markdown("---")
+    st.markdown("**تواصل — DONIA LABS TECH**")
+    st.markdown(
+        f"""
+        <div class="donia-social">
+          <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer" title="WhatsApp">\U0001F4F1 WA</a>
+          <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer" title="LinkedIn">\U0001F4BC in</a>
+          <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook">\U0001F4D6 f</a>
+          <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer" title="Telegram">✈️ TG</a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )<div class="donia-ip-footer">
   <div style="margin-bottom:.5rem;font-size:1rem">
     {COPYRIGHT_FOOTER_AR}
   </div>
