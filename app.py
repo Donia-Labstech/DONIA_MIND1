@@ -570,8 +570,8 @@ def get_arcee_client():
     if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
         return None
     try:
-        # ✅ Workspace name hardcoded as required
-        return Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")
+        # ✅ No workspace hardcoding – uses only the API key
+        return Arcee(api_key=ARCEE_API_KEY)
     except Exception as e:
         st.warning(f"Arcee init error: {e}")
         return None
@@ -1593,7 +1593,7 @@ with st.sidebar:
         arcee_connected = False
         if _ARCEE_AVAILABLE and ARCEE_API_KEY:
             try:
-                arcee_client = Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")
+                arcee_client = Arcee(api_key=ARCEE_API_KEY)  # No workspace hardcoding
                 arcee_connected = arcee_client is not None
             except:
                 pass
@@ -1626,7 +1626,8 @@ with st.sidebar:
     # Rest of original sidebar (level, grade, branch, subject, school info)
     level = st.selectbox("🏫 الطور التعليمي", list(CURRICULUM.keys()))
     info = CURRICULUM[level]
-    grade = st.selectbox("📚 السنة الدراسية", info["grades"])
+    # ✅ Changed label from "السنة الدراسية" to "المستوى"
+    grade = st.selectbox("📚 المستوى", info["grades"])
     branch = None
     if info["branches"] and grade in info["branches"]:
         branch = st.selectbox("🎯 الشعبة", list(info["branches"][grade].keys()))
@@ -2638,7 +2639,7 @@ with tab_stats:
         arcee_connected = False
         if _ARCEE_AVAILABLE and ARCEE_API_KEY:
             try:
-                arcee_client = Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")
+                arcee_client = Arcee(api_key=ARCEE_API_KEY)  # No workspace hardcoding
                 arcee_connected = arcee_client is not None
             except:
                 pass
