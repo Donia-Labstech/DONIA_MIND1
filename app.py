@@ -153,10 +153,14 @@ def get_pdf_mode_for_subject(subject: str):
 class ArabicFPDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Try to load Amiri, fallback to Helvetica if font file is corrupt
+        # ✅ FIX: Use absolute path for fonts to avoid loading errors
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        font_dir = os.path.join(base_dir, "fonts")
+        reg_path = os.path.join(font_dir, "Amiri-Regular.ttf")
+        bold_path = os.path.join(font_dir, "Amiri-Bold.ttf")
         try:
-            self.add_font("Amiri", "", "fonts/Amiri-Regular.ttf", uni=True)
-            self.add_font("Amiri", "B", "fonts/Amiri-Bold.ttf", uni=True)
+            self.add_font("Amiri", "", reg_path, uni=True)
+            self.add_font("Amiri", "B", bold_path, uni=True)
             self.set_font("Amiri", size=12)
             self.use_amiri = True
         except Exception as e:
@@ -171,13 +175,15 @@ class ArabicFPDF(FPDF):
 
 def ensure_font_files():
     """Download Amiri fonts if missing or corrupted (re‑download if bad)."""
-    os.makedirs("fonts", exist_ok=True)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    font_dir = os.path.join(base_dir, "fonts")
+    os.makedirs(font_dir, exist_ok=True)
     pairs = (
         ("Amiri-Regular.ttf", "https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Regular.ttf"),
         ("Amiri-Bold.ttf", "https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Bold.ttf"),
     )
     for fname, url in pairs:
-        path = os.path.join("fonts", fname)
+        path = os.path.join(font_dir, fname)
         # Re‑download if file is missing or smaller than 100KB (corrupt)
         if not os.path.exists(path) or os.path.getsize(path) < 100000:
             try:
@@ -498,7 +504,7 @@ def get_arcee_client():
     if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
         return None
     try:
-        # 🔧 FIX: Added workspace name "Donia-Labstech"
+        # ✅ Workspace name hardcoded as required
         return Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")
     except Exception as e:
         st.warning(f"Arcee init error: {e}")
@@ -1521,7 +1527,7 @@ with st.sidebar:
         arcee_connected = False
         if _ARCEE_AVAILABLE and ARCEE_API_KEY:
             try:
-                arcee_client = Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")  # 🔧 Workspace added
+                arcee_client = Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")
                 arcee_connected = arcee_client is not None
             except:
                 pass
