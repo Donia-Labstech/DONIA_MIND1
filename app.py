@@ -570,7 +570,7 @@ def get_arcee_client():
     if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
         return None
     try:
-        # ✅ No workspace hardcoding – uses only the API key
+        # ✅ Workspace removed – uses only the API key (consistent with Groq)
         return Arcee(api_key=ARCEE_API_KEY)
     except Exception as e:
         st.warning(f"Arcee init error: {e}")
@@ -1593,7 +1593,8 @@ with st.sidebar:
         arcee_connected = False
         if _ARCEE_AVAILABLE and ARCEE_API_KEY:
             try:
-                arcee_client = Arcee(api_key=ARCEE_API_KEY)  # No workspace hardcoding
+                # ✅ Workspace removed – uses only the API key
+                arcee_client = Arcee(api_key=ARCEE_API_KEY)
                 arcee_connected = arcee_client is not None
             except:
                 pass
@@ -2639,7 +2640,8 @@ with tab_stats:
         arcee_connected = False
         if _ARCEE_AVAILABLE and ARCEE_API_KEY:
             try:
-                arcee_client = Arcee(api_key=ARCEE_API_KEY)  # No workspace hardcoding
+                # ✅ Workspace removed – uses only the API key
+                arcee_client = Arcee(api_key=ARCEE_API_KEY)
                 arcee_connected = arcee_client is not None
             except:
                 pass
