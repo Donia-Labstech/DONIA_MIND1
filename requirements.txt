@@ -1,31 +1,39 @@
-# DONIA MIND V4.0 - PRODUCTION DEPENDENCIES (ASCII only)
+# ═══════════════════════════════════════════════════════════
+# DONIA MIND V4.0 - OFFICIAL REQUIREMENTS (FIXED)
+# ═══════════════════════════════════════════════════════════
 
+# الأساسيات وواجهة المستخدم
 streamlit>=1.32.0
 python-dotenv>=1.0.0
 requests>=2.31.0
 
+# الذكاء الاصطناعي والبحث الذكي
 groq>=0.4.0
 langchain-groq>=0.1.3
 tavily-python
-arcee-python
-
+ARCEE
+# أدوات الوسائط المتعددة والرسم
 streamlit-mic-recorder
 
+# معالجة اللغات والتعرف التلقائي
 langdetect
 arabic-reshaper>=3.0.0
 python-bidi>=0.4.2
 
+# معالجة البيانات والرسوم البيانية
 pandas>=2.0.0
 openpyxl>=3.1.2
 xlsxwriter>=3.1.0
 xlrd>=2.0.1
 plotly>=5.18.0
 
+# معالجة الصور و OCR ورموز الاستجابة
 Pillow>=10.0.0
 pytesseract>=0.3.10
 qrcode[pil]>=7.4.2
 
-fpdf2>=2.7.0
+# توليد المستندات والـ PDF (FPDF2 مع دعم اليونيكود)
+fpdf2>=2.7.0          # ← تم التبديل من fpdf القديم إلى fpdf2
 reportlab>=4.0.0
 python-docx>=1.1.0
 lxml>=4.9.0
