@@ -33,7 +33,7 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 
 # ========== v4.0 NEW IMPORTS ==========
-from fpdf import FPDF
+from fpdf import FPDF  # This is fpdf2 (the new library) – ensure requirements.txt has fpdf2
 import arabic_reshaper
 from bidi.algorithm import get_display
 import langdetect
@@ -498,7 +498,8 @@ def get_arcee_client():
     if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
         return None
     try:
-        return Arcee(api_key=ARCEE_API_KEY)
+        # 🔧 FIX: Added workspace name "Donia-Labstech"
+        return Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")
     except Exception as e:
         st.warning(f"Arcee init error: {e}")
         return None
@@ -1520,7 +1521,7 @@ with st.sidebar:
         arcee_connected = False
         if _ARCEE_AVAILABLE and ARCEE_API_KEY:
             try:
-                arcee_client = Arcee(api_key=ARCEE_API_KEY)
+                arcee_client = Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")  # 🔧 Workspace added
                 arcee_connected = arcee_client is not None
             except:
                 pass
@@ -2565,7 +2566,7 @@ with tab_stats:
         arcee_connected = False
         if _ARCEE_AVAILABLE and ARCEE_API_KEY:
             try:
-                arcee_client = Arcee(api_key=ARCEE_API_KEY)
+                arcee_client = Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")
                 arcee_connected = arcee_client is not None
             except:
                 pass
