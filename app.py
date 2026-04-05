@@ -10,7 +10,7 @@ DUAL-AI DEEP-LOGIC ARCHITECTURE (Zero‑Loss Monolithic Protocol)
   + Global LaTeX cleaning & Plotly interactive functions
   + Fixed camera input & document scanner
   + Strict RTL CSS without layout breakage
-  + All Word/PDF download buttons restored
+  + All Word/PDF download buttons restored & unified
 ═══════════════════════════════════════════════════════════
 """
 import streamlit as st
@@ -33,7 +33,7 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 
 # ========== v4.0 NEW IMPORTS ==========
-from fpdf import FPDF  # This is fpdf2 (the new library) – ensure requirements.txt has fpdf2
+from fpdf import FPDF  # fpdf2
 import arabic_reshaper
 from bidi.algorithm import get_display
 import langdetect
@@ -79,10 +79,8 @@ except ImportError:
 load_dotenv()
 
 # ═══════════════════════════════════════════════════════════
-# v4.0: DUAL-AI CONFIGURATION (from st.secrets only)
+# v4.0: STANDARD API KEY HELPER (used for both Groq and Arcee)
 # ═══════════════════════════════════════════════════════════
-DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-
 def _get_api_key(key_name: str) -> str:
     try:
         if hasattr(st, "secrets") and st.secrets:
@@ -92,6 +90,7 @@ def _get_api_key(key_name: str) -> str:
         pass
     return os.getenv(key_name, "").strip()
 
+DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_API_KEY = _get_api_key("GROQ_API_KEY")
 ARCEE_API_KEY = _get_api_key("ARCEE_API_KEY")
 TAVILY_API_KEY = _get_api_key("TAVILY_API_KEY")
@@ -148,17 +147,15 @@ def get_pdf_mode_for_subject(subject: str):
     return True, "Arabic"
 
 # ═══════════════════════════════════════════════════════════
-# v4.0: FPDF2 WITH AMIRI FONT (Zero‑Box PDF + Fallback)
+# v4.0: FPDF2 WITH ROBUST FONT HANDLING (Amiri + DejaVu fallback)
 # ═══════════════════════════════════════════════════════════
 class ArabicFPDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # ✅ FIX: Use absolute path for fonts and add DejaVu fallback
         base_dir = os.path.dirname(os.path.abspath(__file__))
         font_dir = os.path.join(base_dir, "fonts")
         reg_path = os.path.join(font_dir, "Amiri-Regular.ttf")
         bold_path = os.path.join(font_dir, "Amiri-Bold.ttf")
-        # Also try to load a generic Unicode font (DejaVu) as fallback for Arabic
         dejavu_path = os.path.join(font_dir, "DejaVuSans.ttf")
         self.use_amiri = False
         try:
@@ -170,7 +167,6 @@ class ArabicFPDF(FPDF):
             else:
                 raise Exception("Amiri font missing or corrupt")
         except Exception:
-            # Fallback to a downloadable Unicode font (DejaVu Sans)
             try:
                 if not os.path.exists(dejavu_path):
                     url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf"
@@ -187,10 +183,7 @@ class ArabicFPDF(FPDF):
                 self.use_amiri = False
 
     def multi_cell_text(self, text, w, align='R', rtl=True):
-        if rtl and self.use_amiri:
-            text = reshape_arabic(text)
-        # If using DejaVu, also reshape for better RTL
-        elif rtl and not self.use_amiri:
+        if rtl:
             text = reshape_arabic(text)
         self.multi_cell(w, 6, text, border=0, align=align)
 
@@ -205,7 +198,6 @@ def ensure_font_files():
     )
     for fname, url in pairs:
         path = os.path.join(font_dir, fname)
-        # Re‑download if file is missing or smaller than 100KB (corrupt)
         if not os.path.exists(path) or os.path.getsize(path) < 100000:
             try:
                 r = requests.get(url, timeout=10)
@@ -570,7 +562,6 @@ def get_arcee_client():
     if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
         return None
     try:
-        # ✅ Workspace name hardcoded as required
         return Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")
     except Exception as e:
         st.warning(f"Arcee init error: {e}")
@@ -1195,7 +1186,7 @@ def generate_multi_sheet_grade_book(classes_data: list, school_name: str, subjec
     return buf.read()
 
 # ═══════════════════════════════════════════════════════════
-# v4.0: FLOATING ASSISTANT
+# v4.0: FLOATING ASSISTANT (unchanged)
 # ═══════════════════════════════════════════════════════════
 def render_floating_assistant():
     if "assistant_messages" not in st.session_state:
@@ -1626,7 +1617,8 @@ with st.sidebar:
     # Rest of original sidebar (level, grade, branch, subject, school info)
     level = st.selectbox("🏫 الطور التعليمي", list(CURRICULUM.keys()))
     info = CURRICULUM[level]
-    grade = st.selectbox("📚 السنة الدراسية", info["grades"])
+    # LABEL FIX: changed from "السنة الدراسية" to "المستوى"
+    grade = st.selectbox("📚 المستوى", info["grades"])
     branch = None
     if info["branches"] and grade in info["branches"]:
         branch = st.selectbox("🎯 الشعبة", list(info["branches"][grade].keys()))
@@ -1717,6 +1709,10 @@ render_floating_assistant()
 ])
 
 branch_txt = f" – {branch}" if branch else ""
+
+# Helper for unique download keys
+def _unique_suffix():
+    return datetime.now().strftime("%Y%m%d%H%M%S%f")
 
 # ========== TAB 1 — Lesson Plan ==========
 with tab_plan:
@@ -1849,25 +1845,26 @@ with tab_plan:
                          plan_text, datetime.now().strftime("%Y-%m-%d %H:%M")))
                     st.success("✅ تم حفظ المذكرة")
 
-                    d1, d2, d3 = st.columns(3)
-                    with d1:
+                    # UNIFIED DOWNLOAD BUTTONS (3 columns)
+                    unique_id = _unique_suffix()
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
                         st.download_button("📥 تحميل نص",
                                            plan_text.encode("utf-8-sig"),
                                            f"مذكرة_{plan_lesson}.txt",
-                                           key="dl_plan_txt")
-                    with d2:
+                                           key=f"plan_txt_{unique_id}")
+                    with col2:
                         pdf_p = generate_lesson_plan_pdf(plan_data)
                         st.download_button("📄 تحميل PDF (النموذج الرسمي)", pdf_p,
                                            f"مذكرة_{plan_lesson}.pdf", "application/pdf",
-                                           key="dl_plan_pdf")
-                    with d3:
+                                           key=f"plan_pdf_{unique_id}")
+                    with col3:
                         if _DOCX_AVAILABLE:
                             docx_p = generate_lesson_plan_docx(plan_data)
                             st.download_button("📝 تحميل Word (.docx)", docx_p,
                                                f"مذكرة_{plan_lesson}.docx",
-                                               "application/vnd.openxmlformats-officedocument"
-                                               ".wordprocessingml.document",
-                                               key="dl_plan_docx")
+                                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                               key=f"plan_docx_{unique_id}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
                 except Exception as err:
@@ -1989,25 +1986,25 @@ with tab_exam:
                         "subject": subject, "duration": exam_duration,
                         "content": exam_content,
                     }
-                    d1, d2, d3 = st.columns(3)
-                    with d1:
+                    unique_id = _unique_suffix()
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
                         st.download_button("📥 تحميل نص",
                                            exam_content.encode("utf-8-sig"),
                                            f"اختبار_{subject}_{exam_semester}.txt",
-                                           key="dl_exam_txt")
-                    with d2:
+                                           key=f"exam_txt_{unique_id}")
+                    with col2:
                         pdf_e = generate_exam_pdf(exam_pdf_data)
                         st.download_button("📄 تحميل PDF (النموذج الرسمي)", pdf_e,
                                            f"اختبار_{subject}_{exam_semester}.pdf",
-                                           "application/pdf", key="dl_exam_pdf")
-                    with d3:
+                                           "application/pdf", key=f"exam_pdf_{unique_id}")
+                    with col3:
                         if _DOCX_AVAILABLE:
                             docx_e = generate_exam_docx(exam_pdf_data)
                             st.download_button("📝 تحميل Word (.docx)", docx_e,
                                                f"اختبار_{subject}_{exam_semester}.docx",
-                                               "application/vnd.openxmlformats-officedocument"
-                                               ".wordprocessingml.document",
-                                               key="dl_exam_docx")
+                                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                               key=f"exam_docx_{unique_id}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
                 except Exception as err:
@@ -2286,19 +2283,24 @@ with tab_report:
                     }
                     st.session_state.stored_report_data = report_data
                     pdf_rep = generate_report_pdf(report_data)
-                    r1, r2 = st.columns(2)
-                    with r1:
+                    unique_id = _unique_suffix()
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.download_button("📥 تحميل نص التقرير",
+                                           ai_analysis.encode("utf-8-sig"),
+                                           f"تقرير_نتائج_{rep_semester}.txt",
+                                           key=f"rep_txt_{unique_id}")
+                    with col2:
                         st.download_button("📄 تحميل التقرير الكامل PDF", pdf_rep,
                                            f"تقرير_نتائج_{rep_semester}.pdf",
-                                           "application/pdf", key="dl_report_pdf")
-                    with r2:
+                                           "application/pdf", key=f"rep_pdf_{unique_id}")
+                    with col3:
                         if _DOCX_AVAILABLE:
                             docx_rep = generate_report_docx(report_data)
                             st.download_button("📝 تحميل Word (.docx)", docx_rep,
                                                f"تقرير_نتائج_{rep_semester}.docx",
-                                               "application/vnd.openxmlformats-officedocument"
-                                               ".wordprocessingml.document",
-                                               key="dl_report_docx")
+                                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                               key=f"rep_docx_{unique_id}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
                 except Exception as e:
@@ -2309,19 +2311,26 @@ with tab_report:
                 "semester": rep_semester, "classes": all_classes, "ai_analysis": "",
             }
             pdf_rep = generate_report_pdf(report_data)
-            rr1, rr2 = st.columns(2)
-            with rr1:
+            unique_id = _unique_suffix()
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.download_button("📥 تحميل نص التقرير",
+                                   "لا يوجد تحليل ذكي".encode("utf-8-sig"),
+                                   f"تقرير_نتائج_{rep_semester}.txt",
+                                   key=f"rep_txt2_{unique_id}")
+            with col2:
                 st.download_button("📄 تحميل التقرير PDF", pdf_rep,
                                    "تقرير_نتائج.pdf", "application/pdf",
-                                   key="dl_report_pdf2")
-            with rr2:
+                                   key=f"rep_pdf2_{unique_id}")
+            with col3:
                 if _DOCX_AVAILABLE:
                     docx_rep2 = generate_report_docx(report_data)
                     st.download_button("📝 تحميل Word (.docx)", docx_rep2,
                                        "تقرير_نتائج.docx",
-                                       "application/vnd.openxmlformats-officedocument"
-                                       ".wordprocessingml.document",
-                                       key="dl_report_docx2")
+                                       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                       key=f"rep_docx2_{unique_id}")
+                else:
+                    st.caption("⚠️ python-docx غير مثبت")
 
 # ========== TAB 5 — Exercise Generation ==========
 with tab_ex:
@@ -2376,15 +2385,32 @@ with tab_ex:
                         (level, grade, branch or "", subject, lesson, ex_type,
                          difficulty, res_text, datetime.now().strftime("%Y-%m-%d %H:%M")))
                     st.success("✅ تم الحفظ")
-                    d1, d2 = st.columns(2)
-                    with d1:
-                        st.download_button("📥 نص", res_text.encode("utf-8-sig"),
-                                           f"{lesson}.txt", key="dl_ex_txt")
-                    with d2:
+                    unique_id = _unique_suffix()
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.download_button("📥 تحميل نص", res_text.encode("utf-8-sig"),
+                                           f"{lesson}.txt", key=f"ex_txt_{unique_id}")
+                    with col2:
                         rtl, _ = get_pdf_mode_for_subject(subject)
                         pdf_ex = generate_simple_pdf(res_text, lesson, f"{subject} | {grade}", rtl=rtl)
-                        st.download_button("📄 PDF", pdf_ex, f"{lesson}.pdf",
-                                           "application/pdf", key="dl_ex_pdf")
+                        st.download_button("📄 تحميل PDF", pdf_ex, f"{lesson}.pdf",
+                                           "application/pdf", key=f"ex_pdf_{unique_id}")
+                    with col3:
+                        if _DOCX_AVAILABLE:
+                            # Simple DOCX for exercise (reuse lesson plan docx generator with a minimal dict)
+                            ex_docx_data = {
+                                "school": school_name, "teacher": teacher_name,
+                                "subject": subject, "grade": f"{grade}{branch_txt}",
+                                "lesson": lesson, "domain": "تمارين",
+                                "duration": "غير محدد", "content": res_text
+                            }
+                            docx_ex = generate_lesson_plan_docx(ex_docx_data)
+                            st.download_button("📝 تحميل Word (.docx)", docx_ex,
+                                               f"{lesson}.docx",
+                                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                               key=f"ex_docx_{unique_id}")
+                        else:
+                            st.caption("⚠️ python-docx غير مثبت")
                 except Exception as err:
                     st.error(f"❌ {err}")
 
@@ -2480,12 +2506,36 @@ with tab_correct:
                         (student_name or "مجهول", exam_subj, gv, total_marks,
                          correction, datetime.now().strftime("%Y-%m-%d %H:%M")))
                     st.success(f"✅ العلامة: {gv}/{total_marks}")
-                    rtl, _ = get_pdf_mode_for_subject(exam_subj)
-                    pdf_c = generate_simple_pdf(
-                        correction, f"تصحيح: {student_name or 'طالب'}", exam_subj, rtl=rtl)
-                    st.download_button("📄 تحميل التصحيح PDF", pdf_c,
-                                       f"تصحيح_{student_name or 'طالب'}.pdf",
-                                       "application/pdf", key="dl_corr_pdf")
+                    unique_id = _unique_suffix()
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.download_button("📥 تحميل نص التصحيح",
+                                           correction.encode("utf-8-sig"),
+                                           f"تصحيح_{student_name or 'طالب'}.txt",
+                                           key=f"corr_txt_{unique_id}")
+                    with col2:
+                        rtl, _ = get_pdf_mode_for_subject(exam_subj)
+                        pdf_c = generate_simple_pdf(
+                            correction, f"تصحيح: {student_name or 'طالب'}", exam_subj, rtl=rtl)
+                        st.download_button("📄 تحميل التصحيح PDF", pdf_c,
+                                           f"تصحيح_{student_name or 'طالب'}.pdf",
+                                           "application/pdf", key=f"corr_pdf_{unique_id}")
+                    with col3:
+                        if _DOCX_AVAILABLE:
+                            corr_docx_data = {
+                                "school": school_name, "teacher": teacher_name,
+                                "subject": exam_subj, "grade": grade,
+                                "lesson": f"تصحيح {student_name or 'طالب'}",
+                                "domain": "تصحيح", "duration": "غير محدد",
+                                "content": correction
+                            }
+                            docx_corr = generate_lesson_plan_docx(corr_docx_data)
+                            st.download_button("📝 تحميل Word (.docx)", docx_corr,
+                                               f"تصحيح_{student_name or 'طالب'}.docx",
+                                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                               key=f"corr_docx_{unique_id}")
+                        else:
+                            st.caption("⚠️ python-docx غير مثبت")
                 except Exception as err:
                     st.error(f"❌ {err}")
 
@@ -2505,19 +2555,33 @@ with tab_archive:
             ex_id, lv, gr, br, sub, les, xt, diff, cont, created = ex
             with st.expander(f"📚 {les} | {sub} | {gr} | {diff} | 🕒 {created}"):
                 st.markdown(f'<div class="result-box">{cont[:400]}…</div>', unsafe_allow_html=True)
-                b1, b2, b3 = st.columns(3)
-                with b1:
+                unique_id = _unique_suffix()
+                col1, col2, col3 = st.columns(3)
+                with col1:
                     st.download_button("📥 نص", cont.encode("utf-8-sig"),
-                                       f"{les}.txt", key=f"dl_{ex_id}")
-                with b2:
+                                       f"{les}.txt", key=f"arch_txt_{ex_id}_{unique_id}")
+                with col2:
                     rtl, _ = get_pdf_mode_for_subject(sub)
                     px2 = generate_simple_pdf(cont, les, rtl=rtl)
                     st.download_button("📄 PDF", px2, f"{les}.pdf",
-                                       "application/pdf", key=f"pdf_{ex_id}")
-                with b3:
-                    if st.button("🗑️ حذف", key=f"del_{ex_id}"):
-                        db_exec("DELETE FROM exercises WHERE id=?", (ex_id,))
-                        st.rerun()
+                                       "application/pdf", key=f"arch_pdf_{ex_id}_{unique_id}")
+                with col3:
+                    if _DOCX_AVAILABLE:
+                        ex_docx_data = {
+                            "school": school_name, "teacher": teacher_name,
+                            "subject": sub, "grade": gr,
+                            "lesson": les, "domain": "تمارين",
+                            "duration": "غير محدد", "content": cont
+                        }
+                        docx_ex = generate_lesson_plan_docx(ex_docx_data)
+                        st.download_button("📝 Word", docx_ex, f"{les}.docx",
+                                           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                           key=f"arch_docx_{ex_id}_{unique_id}")
+                    else:
+                        st.caption("⚠️ Word غير متاح")
+                if st.button("🗑️ حذف", key=f"del_{ex_id}"):
+                    db_exec("DELETE FROM exercises WHERE id=?", (ex_id,))
+                    st.rerun()
     with arch_tabs[1]:
         plans = db_exec("SELECT * FROM lesson_plans ORDER BY created_at DESC",
                         fetch=True) or []
@@ -2545,15 +2609,30 @@ with tab_archive:
                 continue
             with st.expander(f"📝 {les} | {sub} | {gr} | {dom} | 🕒 {created}"):
                 st.markdown(f'<div class="result-box">{cont[:350]}…</div>', unsafe_allow_html=True)
-                pp1, pp2 = st.columns(2)
-                with pp1:
+                unique_id = _unique_suffix()
+                col1, col2, col3 = st.columns(3)
+                with col1:
                     st.download_button("📥 نص", cont.encode("utf-8-sig"),
-                                       f"مذكرة_{les}.txt", key=f"pln_{pid}")
-                with pp2:
+                                       f"مذكرة_{les}.txt", key=f"plan_txt_{pid}_{unique_id}")
+                with col2:
                     rtl, _ = get_pdf_mode_for_subject(sub)
                     ppdf = generate_simple_pdf(cont, f"مذكرة: {les}", f"{sub} | {gr}", rtl=rtl)
                     st.download_button("📄 PDF", ppdf, f"مذكرة_{les}.pdf",
-                                       "application/pdf", key=f"ppdf_{pid}")
+                                       "application/pdf", key=f"plan_pdf_{pid}_{unique_id}")
+                with col3:
+                    if _DOCX_AVAILABLE:
+                        plan_docx_data = {
+                            "school": school_name, "teacher": teacher_name,
+                            "subject": sub, "grade": gr,
+                            "lesson": les, "domain": dom,
+                            "duration": dur, "content": cont
+                        }
+                        docx_plan = generate_lesson_plan_docx(plan_docx_data)
+                        st.download_button("📝 Word", docx_plan, f"مذكرة_{les}.docx",
+                                           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                           key=f"plan_docx_{pid}_{unique_id}")
+                    else:
+                        st.caption("⚠️ Word غير متاح")
     with arch_tabs[2]:
         exams = db_exec("SELECT * FROM exams ORDER BY created_at DESC",
                         fetch=True) or []
@@ -2561,11 +2640,12 @@ with tab_archive:
             eid, lv, gr, sub, sem, cont, created = ex
             with st.expander(f"📄 {sub} | {gr} | {sem} | 🕒 {created}"):
                 st.markdown(f'<div class="result-box">{cont[:350]}…</div>', unsafe_allow_html=True)
-                ep1, ep2 = st.columns(2)
-                with ep1:
+                unique_id = _unique_suffix()
+                col1, col2, col3 = st.columns(3)
+                with col1:
                     st.download_button("📥 نص", cont.encode("utf-8-sig"),
-                                       f"اختبار_{sub}.txt", key=f"edl_{eid}")
-                with ep2:
+                                       f"اختبار_{sub}.txt", key=f"exam_txt_{eid}_{unique_id}")
+                with col2:
                     exam_d = {
                         "school": school_name, "wilaya": wilaya, "grade": gr,
                         "year": school_year, "district": "...", "semester": sem,
@@ -2573,7 +2653,22 @@ with tab_archive:
                     }
                     epdf = generate_exam_pdf(exam_d)
                     st.download_button("📄 PDF", epdf, f"اختبار_{sub}.pdf",
-                                       "application/pdf", key=f"epdf_{eid}")
+                                       "application/pdf", key=f"exam_pdf_{eid}_{unique_id}")
+                with col3:
+                    if _DOCX_AVAILABLE:
+                        exam_docx_data = {
+                            "school": school_name, "wilaya": wilaya,
+                            "grade": gr, "year": school_year,
+                            "district": "...", "semester": sem,
+                            "subject": sub, "duration": "ساعتان",
+                            "content": cont
+                        }
+                        docx_exam = generate_exam_docx(exam_docx_data)
+                        st.download_button("📝 Word", docx_exam, f"اختبار_{sub}.docx",
+                                           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                           key=f"exam_docx_{eid}_{unique_id}")
+                    else:
+                        st.caption("⚠️ Word غير متاح")
     with arch_tabs[3]:
         corrs = db_exec("SELECT * FROM corrections ORDER BY created_at DESC",
                         fetch=True) or []
