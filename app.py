@@ -210,38 +210,32 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=14)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=14)
-    if rtl:
-        pdf.cell(0, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
-        pdf.cell(0, 8, reshape_arabic("وزارة التربية الوطنية"), ln=True, align='C')
-        pdf.cell(0, 8, reshape_arabic(f"DONIA MIND — {title}"), ln=True, align='C')
-    else:
-        pdf.cell(0, 8, "Algerian Democratic Republic", ln=True, align='C')
-        pdf.cell(0, 8, "Ministry of Education", ln=True, align='C')
-        pdf.cell(0, 8, f"DONIA MIND — {title}", ln=True, align='C')
-    pdf.ln(5)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=11)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
+    pdf.set_font(pdf.get_font_name(), size=10)
+    pdf.cell_text(0, 8, "الجمهورية الجزائرية الديمقراطية الشعبية", rtl=rtl, align='C')
+    pdf.cell_text(0, 8, "وزارة التربية الوطنية", rtl=rtl, align='C')
+    pdf.ln(4)
+    pdf.set_font(pdf.get_font_name(), 'B', 14)
+    pdf.cell_text(0, 10, title, rtl=rtl, align='C')
+    if subtitle:
+        pdf.set_font(pdf.get_font_name(), size=10)
+        pdf.cell_text(0, 8, subtitle, rtl=rtl, align='C')
+    pdf.ln(6)
+    pdf.set_font(pdf.get_font_name(), size=11)
     for line in content.splitlines():
         line = line.strip()
         if not line:
             pdf.ln(3)
             continue
         if line.startswith("##"):
-            pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), 'B', 12)
+            pdf.set_font(pdf.get_font_name(), 'B', 12)
             pdf.multi_cell_text(line[2:], 190, align='R' if rtl else 'L', rtl=rtl)
-            pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=11)
+            pdf.set_font(pdf.get_font_name(), size=11)
         else:
             pdf.multi_cell_text(line, 190, align='R' if rtl else 'L', rtl=rtl)
         pdf.ln(2)
     pdf.set_y(-15)
-    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
-    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
+    pdf.set_font(pdf.get_font_name(), size=8)
+    pdf.cell_text(0, 10, COPYRIGHT_FOOTER_AR, rtl=rtl, align='C')
     return pdf.output(dest='S').encode('latin1')
 
 def generate_exam_pdf(exam_data: dict) -> bytes:
@@ -250,26 +244,17 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     pdf.add_page()
     subj = exam_data.get("subject", "")
     rtl, _ = get_pdf_mode_for_subject(subj)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=10)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
-    pdf.cell(95, 8, reshape_arabic(exam_data.get("school", "")) if rtl else exam_data.get("school", ""), border=1, align='C')
-    pdf.cell(95, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية") if rtl else "Algerian Republic", border=1, ln=True, align='C')
-    pdf.cell(95, 8, reshape_arabic(f"المستوى: {exam_data.get('grade', '')}") if rtl else f"Level: {exam_data.get('grade', '')}", border=1)
-    pdf.cell(95, 8, reshape_arabic(f"المدة: {exam_data.get('duration', '')}") if rtl else f"Duration: {exam_data.get('duration', '')}", border=1, ln=True)
+    pdf.set_font(pdf.get_font_name(), size=10)
+    pdf.cell_text(95, 8, exam_data.get("school", ""), rtl=rtl, align='C', border=1)
+    pdf.cell_text(95, 8, "الجمهورية الجزائرية الديمقراطية الشعبية", rtl=rtl, align='C', border=1, ln=1)
+    pdf.cell_text(95, 8, f"المستوى: {exam_data.get('grade', '')}", rtl=rtl, align='C', border=1)
+    pdf.cell_text(95, 8, f"المدة: {exam_data.get('duration', '')}", rtl=rtl, align='C', border=1, ln=1)
     pdf.ln(8)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", 'B', 14)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 14)
+    pdf.set_font(pdf.get_font_name(), 'B', 14)
     title = f"اختبار {exam_data.get('semester', '')} في مادة {subj}" if rtl else f"Exam — {exam_data.get('semester', '')} — {subj}"
-    pdf.cell(0, 10, reshape_arabic(title) if rtl else title, ln=True, align='C')
+    pdf.cell_text(0, 10, title, rtl=rtl, align='C', ln=1)
     pdf.ln(5)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=11)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
+    pdf.set_font(pdf.get_font_name(), size=11)
     content = exam_data.get("content", "")
     for line in content.splitlines():
         line = line.strip()
@@ -279,99 +264,77 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
         pdf.multi_cell_text(line, 190, align='R' if rtl else 'L', rtl=rtl)
         pdf.ln(1)
     pdf.set_y(-15)
-    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
-    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
+    pdf.set_font(pdf.get_font_name(), size=8)
+    pdf.cell_text(0, 10, COPYRIGHT_FOOTER_AR, rtl=rtl, align='C')
     return pdf.output(dest='S').encode('latin1')
 
 def generate_report_pdf(report_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=12)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=12)
-    pdf.cell(0, 10, reshape_arabic("تحليل نتائج الأقسام"), ln=True, align='C')
-    pdf.ln(5)
+    pdf.set_font(pdf.get_font_name(), 'B', 14)
+    pdf.cell_text(0, 10, "تحليل نتائج الأقسام", rtl=True, align='C')
+    pdf.ln(6)
+    pdf.set_font(pdf.get_font_name(), size=10)
+    school = report_data.get('school', '')
+    subject = report_data.get('subject', '')
+    semester = report_data.get('semester', '')
+    pdf.cell_text(0, 8, f"{school} | {subject} | {semester}", rtl=True, align='C')
+    pdf.ln(8)
     for cls in report_data.get('classes', []):
-        if pdf.use_amiri:
-            pdf.set_font("Amiri", 'B', 12)
-        else:
-            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 12)
-        pdf.cell(0, 8, reshape_arabic(f"القسم: {cls['name']}"), ln=True, align='R')
-        if pdf.use_amiri:
-            pdf.set_font("Amiri", size=11)
-        else:
-            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
-        stats = f"عدد التلاميذ: {cls.get('total',0)}  |  المعدل: {cls.get('avg',0):.2f}  |  النجاح: {cls.get('pass_rate',0):.1f}%"
-        pdf.multi_cell_text(stats, 190, align='R', rtl=True)
+        pdf.set_font(pdf.get_font_name(), 'B', 12)
+        pdf.cell_text(0, 8, f"القسم: {cls.get('name', '')}", rtl=True, align='R')
+        pdf.set_font(pdf.get_font_name(), size=10)
+        stats_line = (f"عدد التلاميذ: {cls.get('total',0)}  |  "
+                      f"المعدل: {cls.get('avg',0):.2f}  |  "
+                      f"نسبة النجاح: {cls.get('pass_rate',0):.1f}%")
+        pdf.multi_cell_text(stats_line, 190, align='R', rtl=True)
         pdf.ln(4)
         if cls.get('top5'):
-            if pdf.use_amiri:
-                pdf.set_font("Amiri", 'B', 11)
-            else:
-                pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 11)
-            pdf.cell(0, 6, reshape_arabic("أفضل 5 تلاميذ"), ln=True, align='R')
-            if pdf.use_amiri:
-                pdf.set_font("Amiri", size=10)
-            else:
-                pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
+            pdf.set_font(pdf.get_font_name(), 'B', 10)
+            pdf.cell_text(0, 6, "أفضل 5 تلاميذ", rtl=True, align='R')
+            pdf.set_font(pdf.get_font_name(), size=9)
             for i, s in enumerate(cls['top5'][:5], 1):
-                pdf.cell(0, 5, reshape_arabic(f"{i}. {s['name']} — {s['avg']:.2f}"), ln=True, align='R')
+                pdf.cell_text(0, 5, f"{i}. {s['name']} — {s['avg']:.2f}", rtl=True, align='R')
         pdf.ln(6)
     if report_data.get('ai_analysis'):
-        if pdf.use_amiri:
-            pdf.set_font("Amiri", 'B', 11)
-        else:
-            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 11)
-        pdf.cell(0, 8, reshape_arabic("التحليل البيداغوجي"), ln=True, align='R')
-        if pdf.use_amiri:
-            pdf.set_font("Amiri", size=10)
-        else:
-            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
+        pdf.set_font(pdf.get_font_name(), 'B', 11)
+        pdf.cell_text(0, 8, "التحليل البيداغوجي", rtl=True, align='R')
+        pdf.set_font(pdf.get_font_name(), size=10)
         for line in report_data['ai_analysis'].splitlines():
             if line.strip():
                 pdf.multi_cell_text(line, 190, align='R', rtl=True)
     pdf.set_y(-15)
-    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
-    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
+    pdf.set_font(pdf.get_font_name(), size=8)
+    pdf.cell_text(0, 10, COPYRIGHT_FOOTER_AR, rtl=True, align='C')
     return pdf.output(dest='S').encode('latin1')
 
 def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=11)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
-    pdf.cell(0, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
-    pdf.cell(0, 8, reshape_arabic("وزارة التربية الوطنية"), ln=True, align='C')
+    pdf.set_font(pdf.get_font_name(), size=11)
+    pdf.cell_text(0, 8, "الجمهورية الجزائرية الديمقراطية الشعبية", rtl=True, align='C')
+    pdf.cell_text(0, 8, "وزارة التربية الوطنية", rtl=True, align='C')
     pdf.ln(4)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", 'B', 13)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 13)
-    pdf.cell(0, 8, reshape_arabic(f"مذكرة رقم: ____ | المؤسسة: {plan_data.get('school','')} | الأستاذ(ة): {plan_data.get('teacher','')}"), ln=True, align='R')
+    pdf.set_font(pdf.get_font_name(), 'B', 13)
+    pdf.cell_text(0, 8, f"مذكرة رقم: ____ | المؤسسة: {plan_data.get('school','')} | الأستاذ(ة): {plan_data.get('teacher','')}", rtl=True, align='R')
     pdf.ln(5)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=10)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
+    pdf.set_font(pdf.get_font_name(), size=10)
     info = [
         ("الميدان", plan_data.get('domain','')), ("المستوى", plan_data.get('grade','')),
         ("الباب", plan_data.get('chapter','')), ("المدة", plan_data.get('duration','')),
         ("المورد المعرفي", plan_data.get('lesson','')), ("نوع الحصة", plan_data.get('session_type',''))
     ]
     for i in range(0, len(info), 2):
-        pdf.cell(45, 7, reshape_arabic(info[i][0]), border=1)
-        pdf.cell(50, 7, reshape_arabic(info[i][1]), border=1)
-        pdf.cell(45, 7, reshape_arabic(info[i+1][0]), border=1)
-        pdf.cell(50, 7, reshape_arabic(info[i+1][1]), border=1, ln=True)
+        pdf.cell_text(45, 7, info[i][0], border=1, rtl=True)
+        pdf.cell_text(50, 7, info[i][1], border=1, rtl=True)
+        pdf.cell_text(45, 7, info[i+1][0], border=1, rtl=True)
+        pdf.cell_text(50, 7, info[i+1][1], border=1, rtl=True, ln=1)
     pdf.ln(5)
     stages = ["المرحلة", "المدة", "سير الدرس", "التقويم"]
     for s in stages:
-        pdf.cell(47.5, 7, reshape_arabic(s), border=1)
+        pdf.cell_text(47.5, 7, s, border=1, rtl=True)
     pdf.ln()
     rows = [
         ("تهيئة", plan_data.get('duration_t','5 د'), plan_data.get('intro',''), plan_data.get('eval','')),
@@ -380,16 +343,15 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
         ("الواجب المنزلي", "", plan_data.get('homework',''), "")
     ]
     for row in rows:
-        pdf.cell(47.5, 40, reshape_arabic(row[0]), border=1)
-        pdf.cell(47.5, 40, reshape_arabic(row[1]), border=1)
-        pdf.multi_cell(47.5, 5, reshape_arabic(row[2]), border=1)
-        pdf.cell(47.5, 40, reshape_arabic(row[3]), border=1)
+        pdf.cell_text(47.5, 40, row[0], border=1, rtl=True)
+        pdf.cell_text(47.5, 40, row[1], border=1, rtl=True)
+        pdf.multi_cell_text(row[2], 47.5, align='R', rtl=True)
+        pdf.cell_text(47.5, 40, row[3], border=1, rtl=True)
         pdf.ln()
     pdf.set_y(-15)
-    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
-    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
+    pdf.set_font(pdf.get_font_name(), size=8)
+    pdf.cell_text(0, 10, COPYRIGHT_FOOTER_AR, rtl=True, align='C')
     return pdf.output(dest='S').encode('latin1')
-
 # ═══════════════════════════════════════════════════════════
 # DOCX generators (fully restored)
 # ═══════════════════════════════════════════════════════════
