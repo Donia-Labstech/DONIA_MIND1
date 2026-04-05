@@ -33,7 +33,7 @@ pytesseract>=0.3.10
 qrcode[pil]>=7.4.2
 
 # توليد المستندات والـ PDF (FPDF2 مع دعم اليونيكود)
-fpdf2>=2.7.0          
+fpdf2>=2.7.0         # ← تم التبديل من fpdf القديم إلى fpdf2
 reportlab>=4.0.0
 python-docx>=1.1.0
 lxml>=4.9.0
