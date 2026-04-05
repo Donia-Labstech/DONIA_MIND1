@@ -128,16 +128,17 @@ def clean_latex(text: str) -> str:
     text = re.sub(r'\\end\{align\*\?}', r'\\end{align*}', text)
     return text
 
-def reshape_arabic(text: str) -> str:
-    if not text:
+def reshape_arabic(text) -> str:
+    if text is None:
+        return ""
+    text_str = str(text)
+    if not text_str.strip():
         return ""
     try:
-        reshaped = arabic_reshaper.reshape(text)
-        bidi_text = get_display(reshaped)
-        return bidi_text
+        reshaped = arabic_reshaper.reshape(text_str)
+        return get_display(reshaped)
     except Exception:
-        return text
-
+        return text_str
 def get_pdf_mode_for_subject(subject: str):
     s = (subject or "").strip()
     if any(lang in s for lang in ["الإنجليزية", "Anglais"]):
