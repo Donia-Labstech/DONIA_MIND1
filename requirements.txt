@@ -1,39 +1,40 @@
 # ═══════════════════════════════════════════════════════════
-# DONIA MIND V4.0 - OFFICIAL REQUIREMENTS (FIXED)
+# DONIA MIND V4.0 - CLEAN PRODUCTION REQUIREMENTS
 # ═══════════════════════════════════════════════════════════
 
-# الأساسيات وواجهة المستخدم
+# Core Framework
 streamlit>=1.32.0
 python-dotenv>=1.0.0
 requests>=2.31.0
 
-# الذكاء الاصطناعي والبحث الذكي
+# AI & Search Engines
 groq>=0.4.0
 langchain-groq>=0.1.3
-tavily-python
-arcee
-# أدوات الوسائط المتعددة والرسم
-streamlit-mic-recorder
+tavily-python>=0.3.0
+arcee-py>=0.1.0
 
-# معالجة اللغات والتعرف التلقائي
-langdetect
+# Audio & Media
+streamlit-mic-recorder>=0.1.0
+
+# Arabic Language & RTL Support (CRITICAL)
+langdetect>=1.0.9
 arabic-reshaper>=3.0.0
 python-bidi>=0.4.2
 
-# معالجة البيانات والرسوم البيانية
+# Data Processing
 pandas>=2.0.0
 openpyxl>=3.1.2
 xlsxwriter>=3.1.0
 xlrd>=2.0.1
 plotly>=5.18.0
 
-# معالجة الصور و OCR ورموز الاستجابة
+# OCR & QR Generation
 Pillow>=10.0.0
 pytesseract>=0.3.10
 qrcode[pil]>=7.4.2
 
-# توليد المستندات والـ PDF (FPDF2 مع دعم اليونيكود)
-fpdf2>=2.7.0         # ← تم التبديل من fpdf القديم إلى fpdf2
+# Document Generation (Fixed for FPDF2 Unicode)
+fpdf2>=2.7.4
 reportlab>=4.0.0
 python-docx>=1.1.0
 lxml>=4.9.0
