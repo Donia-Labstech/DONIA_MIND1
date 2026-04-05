@@ -12,8 +12,7 @@ DUAL-AI DEEP-LOGIC ARCHITECTURE (Zero‑Loss Monolithic Protocol)
   + Strict RTL CSS without layout breakage
   + All Word/PDF download buttons restored & unified
 ═══════════════════════════════════════════════════════════
-"""
-import streamlit as st
+"""import streamlit as st
 import os
 import sqlite3
 import re
@@ -24,6 +23,7 @@ import urllib.request
 from datetime import datetime
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
+import arcee
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
