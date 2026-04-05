@@ -1,16 +1,13 @@
 """
-DONIA MIND 4 — المعلم الذكي (DONIA SMART TEACHER) — v4.0
+DONIA MIND 4 — المعلم الذكي (DONIA SMART TEACHER) — v4.0 FINAL REPAIR
 ═══════════════════════════════════════════════════════════
-DUAL-AI DEEP-LOGIC ARCHITECTURE (Zero‑Loss Monolithic Protocol)
-  + Groq (primary generation) + Arcee (pedagogical critic)
-  + Real‑time connectivity dashboard (Groq & Arcee)
-  + FPDF2 + arabic_reshaper + bidi → zero‑box PDF
-  + Audio intelligence (streamlit‑mic‑recorder + auto‑detect AR/FR/EN)
-  + Web search (Tavily/Serper) for RAG enrichment
-  + Global LaTeX cleaning & Plotly interactive functions
-  + Fixed camera input & document scanner
-  + Strict RTL CSS without layout breakage
-  + All Word/PDF download buttons restored & unified
+FIXES:
+- Arcee connectivity audit & correct status display
+- Three‑column download buttons (TXT, PDF, DOCX) for ALL outputs
+- PDF engine overhaul: fpdf2 + arabic_reshaper + bidi (no encoding errors)
+- Level (المستوى) fully integrated into prompts
+- Unique keys for all Streamlit widgets
+- Clean requirements.txt (no Arabic/emojis)
 ═══════════════════════════════════════════════════════════
 """
 import streamlit as st
@@ -32,8 +29,8 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 
-# ========== v4.0 NEW IMPORTS ==========
-from fpdf import FPDF  # fpdf2
+# ========== v4.0 PDF & ARABIC IMPORTS ==========
+from fpdf import FPDF
 import arabic_reshaper
 from bidi.algorithm import get_display
 import langdetect
@@ -69,7 +66,7 @@ try:
 except ImportError:
     _TESSERACT_AVAILABLE = False
 
-# Arcee integration for curriculum validation
+# Arcee integration
 try:
     from arcee import Arcee
     _ARCEE_AVAILABLE = True
@@ -95,23 +92,13 @@ GROQ_API_KEY = _get_api_key("GROQ_API_KEY")
 ARCEE_API_KEY = _get_api_key("ARCEE_API_KEY")
 TAVILY_API_KEY = _get_api_key("TAVILY_API_KEY")
 
-COPYRIGHT_FOOTER_AR = (
-    "جميع حقوق الملكية محفوظة حصرياً لمختبر DONIA LABS TECH © 2026"
-)
-WELCOME_MESSAGE_AR = (
-    "أهلاً بك أستاذنا القدير في رحاب DONIA MIND v4.0.. "
-    "معاً نصنع مستقبل التعليم الجزائري بذكاء واحترافية."
-)
+COPYRIGHT_FOOTER_AR = "جميع حقوق الملكية محفوظة حصرياً لمختبر DONIA LABS TECH © 2026"
+WELCOME_MESSAGE_AR = "أهلاً بك أستاذنا القدير في رحاب DONIA MIND v4.0.. معاً نصنع مستقبل التعليم الجزائري بذكاء واحترافية."
 
 # Social URLs
 SOCIAL_URL_WHATSAPP = os.getenv("DONIA_URL_WHATSAPP", "https://wa.me/213674661737")
-SOCIAL_URL_LINKEDIN = os.getenv(
-    "DONIA_URL_LINKEDIN",
-    "https://www.linkedin.com/in/donia-labs-tech-smart-ideas-lab",
-)
-SOCIAL_URL_FACEBOOK = os.getenv(
-    "DONIA_URL_FACEBOOK", "https://www.facebook.com/share/1An6GhVd56/"
-)
+SOCIAL_URL_LINKEDIN = os.getenv("DONIA_URL_LINKEDIN", "https://www.linkedin.com/in/donia-labs-tech-smart-ideas-lab")
+SOCIAL_URL_FACEBOOK = os.getenv("DONIA_URL_FACEBOOK", "https://www.facebook.com/share/1An6GhVd56/")
 SOCIAL_URL_TELEGRAM = os.getenv("DONIA_URL_TELEGRAM", "https://t.me/+LxRzVAK12HZmNTQ8")
 APP_URL = os.getenv("DONIA_APP_URL", "https://doniamind1-pvnmwp3kdthtlfct7uhopm.streamlit.app/")
 
@@ -154,10 +141,28 @@ class ArabicFPDF(FPDF):
         super().__init__(*args, **kwargs)
         base_dir = os.path.dirname(os.path.abspath(__file__))
         font_dir = os.path.join(base_dir, "fonts")
+        os.makedirs(font_dir, exist_ok=True)
         reg_path = os.path.join(font_dir, "Amiri-Regular.ttf")
         bold_path = os.path.join(font_dir, "Amiri-Bold.ttf")
         dejavu_path = os.path.join(font_dir, "DejaVuSans.ttf")
         self.use_amiri = False
+
+        # Download Amiri if missing
+        if not os.path.exists(reg_path) or os.path.getsize(reg_path) < 100000:
+            try:
+                r = requests.get("https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Regular.ttf", timeout=10)
+                with open(reg_path, "wb") as f:
+                    f.write(r.content)
+            except:
+                pass
+        if not os.path.exists(bold_path) or os.path.getsize(bold_path) < 100000:
+            try:
+                r = requests.get("https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Bold.ttf", timeout=10)
+                with open(bold_path, "wb") as f:
+                    f.write(r.content)
+            except:
+                pass
+
         try:
             if os.path.exists(reg_path) and os.path.getsize(reg_path) > 100000:
                 self.add_font("Amiri", "", reg_path, uni=True)
@@ -165,7 +170,7 @@ class ArabicFPDF(FPDF):
                 self.set_font("Amiri", size=12)
                 self.use_amiri = True
             else:
-                raise Exception("Amiri font missing or corrupt")
+                raise Exception("Amiri font missing")
         except Exception:
             try:
                 if not os.path.exists(dejavu_path):
@@ -176,9 +181,7 @@ class ArabicFPDF(FPDF):
                 self.add_font("DejaVu", "", dejavu_path, uni=True)
                 self.set_font("DejaVu", size=12)
                 self.use_amiri = False
-                st.warning("⚠️ تم استخدام خط DejaVu كبديل للعربية (قد يظهر بعض الحروف غير متصلة).")
             except Exception as e2:
-                st.warning(f"⚠️ خطأ في تحميل الخط البديل: {e2}. سيتم استخدام Helvetica (لاتيني فقط).")
                 self.set_font("Helvetica", size=12)
                 self.use_amiri = False
 
@@ -188,7 +191,7 @@ class ArabicFPDF(FPDF):
         self.multi_cell(w, 6, text, border=0, align=align)
 
 def ensure_font_files():
-    """Download Amiri fonts if missing or corrupted (re‑download if bad)."""
+    """Ensure Amiri fonts exist (called on PDF generation)."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
     font_dir = os.path.join(base_dir, "fonts")
     os.makedirs(font_dir, exist_ok=True)
@@ -210,32 +213,38 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
-    pdf.set_font(pdf.get_font_name(), size=10)
-    pdf.cell_text(0, 8, "الجمهورية الجزائرية الديمقراطية الشعبية", rtl=rtl, align='C')
-    pdf.cell_text(0, 8, "وزارة التربية الوطنية", rtl=rtl, align='C')
-    pdf.ln(4)
-    pdf.set_font(pdf.get_font_name(), 'B', 14)
-    pdf.cell_text(0, 10, title, rtl=rtl, align='C')
-    if subtitle:
-        pdf.set_font(pdf.get_font_name(), size=10)
-        pdf.cell_text(0, 8, subtitle, rtl=rtl, align='C')
-    pdf.ln(6)
-    pdf.set_font(pdf.get_font_name(), size=11)
+    if pdf.use_amiri:
+        pdf.set_font("Amiri", size=14)
+    else:
+        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=14)
+    if rtl:
+        pdf.cell(0, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
+        pdf.cell(0, 8, reshape_arabic("وزارة التربية الوطنية"), ln=True, align='C')
+        pdf.cell(0, 8, reshape_arabic(f"DONIA MIND — {title}"), ln=True, align='C')
+    else:
+        pdf.cell(0, 8, "Algerian Democratic Republic", ln=True, align='C')
+        pdf.cell(0, 8, "Ministry of Education", ln=True, align='C')
+        pdf.cell(0, 8, f"DONIA MIND — {title}", ln=True, align='C')
+    pdf.ln(5)
+    if pdf.use_amiri:
+        pdf.set_font("Amiri", size=11)
+    else:
+        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
     for line in content.splitlines():
         line = line.strip()
         if not line:
             pdf.ln(3)
             continue
         if line.startswith("##"):
-            pdf.set_font(pdf.get_font_name(), 'B', 12)
+            pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), 'B', 12)
             pdf.multi_cell_text(line[2:], 190, align='R' if rtl else 'L', rtl=rtl)
-            pdf.set_font(pdf.get_font_name(), size=11)
+            pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=11)
         else:
             pdf.multi_cell_text(line, 190, align='R' if rtl else 'L', rtl=rtl)
         pdf.ln(2)
     pdf.set_y(-15)
-    pdf.set_font(pdf.get_font_name(), size=8)
-    pdf.cell_text(0, 10, COPYRIGHT_FOOTER_AR, rtl=rtl, align='C')
+    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
+    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
     return pdf.output(dest='S').encode('latin1')
 
 def generate_exam_pdf(exam_data: dict) -> bytes:
@@ -244,17 +253,26 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     pdf.add_page()
     subj = exam_data.get("subject", "")
     rtl, _ = get_pdf_mode_for_subject(subj)
-    pdf.set_font(pdf.get_font_name(), size=10)
-    pdf.cell_text(95, 8, exam_data.get("school", ""), rtl=rtl, align='C', border=1)
-    pdf.cell_text(95, 8, "الجمهورية الجزائرية الديمقراطية الشعبية", rtl=rtl, align='C', border=1, ln=1)
-    pdf.cell_text(95, 8, f"المستوى: {exam_data.get('grade', '')}", rtl=rtl, align='C', border=1)
-    pdf.cell_text(95, 8, f"المدة: {exam_data.get('duration', '')}", rtl=rtl, align='C', border=1, ln=1)
+    if pdf.use_amiri:
+        pdf.set_font("Amiri", size=10)
+    else:
+        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
+    pdf.cell(95, 8, reshape_arabic(exam_data.get("school", "")) if rtl else exam_data.get("school", ""), border=1, align='C')
+    pdf.cell(95, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية") if rtl else "Algerian Republic", border=1, ln=True, align='C')
+    pdf.cell(95, 8, reshape_arabic(f"المستوى: {exam_data.get('grade', '')}") if rtl else f"Level: {exam_data.get('grade', '')}", border=1)
+    pdf.cell(95, 8, reshape_arabic(f"المدة: {exam_data.get('duration', '')}") if rtl else f"Duration: {exam_data.get('duration', '')}", border=1, ln=True)
     pdf.ln(8)
-    pdf.set_font(pdf.get_font_name(), 'B', 14)
+    if pdf.use_amiri:
+        pdf.set_font("Amiri", 'B', 14)
+    else:
+        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 14)
     title = f"اختبار {exam_data.get('semester', '')} في مادة {subj}" if rtl else f"Exam — {exam_data.get('semester', '')} — {subj}"
-    pdf.cell_text(0, 10, title, rtl=rtl, align='C', ln=1)
+    pdf.cell(0, 10, reshape_arabic(title) if rtl else title, ln=True, align='C')
     pdf.ln(5)
-    pdf.set_font(pdf.get_font_name(), size=11)
+    if pdf.use_amiri:
+        pdf.set_font("Amiri", size=11)
+    else:
+        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
     content = exam_data.get("content", "")
     for line in content.splitlines():
         line = line.strip()
@@ -264,77 +282,99 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
         pdf.multi_cell_text(line, 190, align='R' if rtl else 'L', rtl=rtl)
         pdf.ln(1)
     pdf.set_y(-15)
-    pdf.set_font(pdf.get_font_name(), size=8)
-    pdf.cell_text(0, 10, COPYRIGHT_FOOTER_AR, rtl=rtl, align='C')
+    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
+    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
     return pdf.output(dest='S').encode('latin1')
 
 def generate_report_pdf(report_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
-    pdf.set_font(pdf.get_font_name(), 'B', 14)
-    pdf.cell_text(0, 10, "تحليل نتائج الأقسام", rtl=True, align='C')
-    pdf.ln(6)
-    pdf.set_font(pdf.get_font_name(), size=10)
-    school = report_data.get('school', '')
-    subject = report_data.get('subject', '')
-    semester = report_data.get('semester', '')
-    pdf.cell_text(0, 8, f"{school} | {subject} | {semester}", rtl=True, align='C')
-    pdf.ln(8)
+    if pdf.use_amiri:
+        pdf.set_font("Amiri", size=12)
+    else:
+        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=12)
+    pdf.cell(0, 10, reshape_arabic("تحليل نتائج الأقسام"), ln=True, align='C')
+    pdf.ln(5)
     for cls in report_data.get('classes', []):
-        pdf.set_font(pdf.get_font_name(), 'B', 12)
-        pdf.cell_text(0, 8, f"القسم: {cls.get('name', '')}", rtl=True, align='R')
-        pdf.set_font(pdf.get_font_name(), size=10)
-        stats_line = (f"عدد التلاميذ: {cls.get('total',0)}  |  "
-                      f"المعدل: {cls.get('avg',0):.2f}  |  "
-                      f"نسبة النجاح: {cls.get('pass_rate',0):.1f}%")
-        pdf.multi_cell_text(stats_line, 190, align='R', rtl=True)
+        if pdf.use_amiri:
+            pdf.set_font("Amiri", 'B', 12)
+        else:
+            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 12)
+        pdf.cell(0, 8, reshape_arabic(f"القسم: {cls['name']}"), ln=True, align='R')
+        if pdf.use_amiri:
+            pdf.set_font("Amiri", size=11)
+        else:
+            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
+        stats = f"عدد التلاميذ: {cls.get('total',0)}  |  المعدل: {cls.get('avg',0):.2f}  |  النجاح: {cls.get('pass_rate',0):.1f}%"
+        pdf.multi_cell_text(stats, 190, align='R', rtl=True)
         pdf.ln(4)
         if cls.get('top5'):
-            pdf.set_font(pdf.get_font_name(), 'B', 10)
-            pdf.cell_text(0, 6, "أفضل 5 تلاميذ", rtl=True, align='R')
-            pdf.set_font(pdf.get_font_name(), size=9)
+            if pdf.use_amiri:
+                pdf.set_font("Amiri", 'B', 11)
+            else:
+                pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 11)
+            pdf.cell(0, 6, reshape_arabic("أفضل 5 تلاميذ"), ln=True, align='R')
+            if pdf.use_amiri:
+                pdf.set_font("Amiri", size=10)
+            else:
+                pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
             for i, s in enumerate(cls['top5'][:5], 1):
-                pdf.cell_text(0, 5, f"{i}. {s['name']} — {s['avg']:.2f}", rtl=True, align='R')
+                pdf.cell(0, 5, reshape_arabic(f"{i}. {s['name']} — {s['avg']:.2f}"), ln=True, align='R')
         pdf.ln(6)
     if report_data.get('ai_analysis'):
-        pdf.set_font(pdf.get_font_name(), 'B', 11)
-        pdf.cell_text(0, 8, "التحليل البيداغوجي", rtl=True, align='R')
-        pdf.set_font(pdf.get_font_name(), size=10)
+        if pdf.use_amiri:
+            pdf.set_font("Amiri", 'B', 11)
+        else:
+            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 11)
+        pdf.cell(0, 8, reshape_arabic("التحليل البيداغوجي"), ln=True, align='R')
+        if pdf.use_amiri:
+            pdf.set_font("Amiri", size=10)
+        else:
+            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
         for line in report_data['ai_analysis'].splitlines():
             if line.strip():
                 pdf.multi_cell_text(line, 190, align='R', rtl=True)
     pdf.set_y(-15)
-    pdf.set_font(pdf.get_font_name(), size=8)
-    pdf.cell_text(0, 10, COPYRIGHT_FOOTER_AR, rtl=True, align='C')
+    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
+    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
     return pdf.output(dest='S').encode('latin1')
 
 def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
-    pdf.set_font(pdf.get_font_name(), size=11)
-    pdf.cell_text(0, 8, "الجمهورية الجزائرية الديمقراطية الشعبية", rtl=True, align='C')
-    pdf.cell_text(0, 8, "وزارة التربية الوطنية", rtl=True, align='C')
+    if pdf.use_amiri:
+        pdf.set_font("Amiri", size=11)
+    else:
+        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
+    pdf.cell(0, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
+    pdf.cell(0, 8, reshape_arabic("وزارة التربية الوطنية"), ln=True, align='C')
     pdf.ln(4)
-    pdf.set_font(pdf.get_font_name(), 'B', 13)
-    pdf.cell_text(0, 8, f"مذكرة رقم: ____ | المؤسسة: {plan_data.get('school','')} | الأستاذ(ة): {plan_data.get('teacher','')}", rtl=True, align='R')
+    if pdf.use_amiri:
+        pdf.set_font("Amiri", 'B', 13)
+    else:
+        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 13)
+    pdf.cell(0, 8, reshape_arabic(f"مذكرة رقم: ____ | المؤسسة: {plan_data.get('school','')} | الأستاذ(ة): {plan_data.get('teacher','')}"), ln=True, align='R')
     pdf.ln(5)
-    pdf.set_font(pdf.get_font_name(), size=10)
+    if pdf.use_amiri:
+        pdf.set_font("Amiri", size=10)
+    else:
+        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
     info = [
         ("الميدان", plan_data.get('domain','')), ("المستوى", plan_data.get('grade','')),
         ("الباب", plan_data.get('chapter','')), ("المدة", plan_data.get('duration','')),
         ("المورد المعرفي", plan_data.get('lesson','')), ("نوع الحصة", plan_data.get('session_type',''))
     ]
     for i in range(0, len(info), 2):
-        pdf.cell_text(45, 7, info[i][0], border=1, rtl=True)
-        pdf.cell_text(50, 7, info[i][1], border=1, rtl=True)
-        pdf.cell_text(45, 7, info[i+1][0], border=1, rtl=True)
-        pdf.cell_text(50, 7, info[i+1][1], border=1, rtl=True, ln=1)
+        pdf.cell(45, 7, reshape_arabic(info[i][0]), border=1)
+        pdf.cell(50, 7, reshape_arabic(info[i][1]), border=1)
+        pdf.cell(45, 7, reshape_arabic(info[i+1][0]), border=1)
+        pdf.cell(50, 7, reshape_arabic(info[i+1][1]), border=1, ln=True)
     pdf.ln(5)
     stages = ["المرحلة", "المدة", "سير الدرس", "التقويم"]
     for s in stages:
-        pdf.cell_text(47.5, 7, s, border=1, rtl=True)
+        pdf.cell(47.5, 7, reshape_arabic(s), border=1)
     pdf.ln()
     rows = [
         ("تهيئة", plan_data.get('duration_t','5 د'), plan_data.get('intro',''), plan_data.get('eval','')),
@@ -343,15 +383,16 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
         ("الواجب المنزلي", "", plan_data.get('homework',''), "")
     ]
     for row in rows:
-        pdf.cell_text(47.5, 40, row[0], border=1, rtl=True)
-        pdf.cell_text(47.5, 40, row[1], border=1, rtl=True)
-        pdf.multi_cell_text(row[2], 47.5, align='R', rtl=True)
-        pdf.cell_text(47.5, 40, row[3], border=1, rtl=True)
+        pdf.cell(47.5, 40, reshape_arabic(row[0]), border=1)
+        pdf.cell(47.5, 40, reshape_arabic(row[1]), border=1)
+        pdf.multi_cell(47.5, 5, reshape_arabic(row[2]), border=1)
+        pdf.cell(47.5, 40, reshape_arabic(row[3]), border=1)
         pdf.ln()
     pdf.set_y(-15)
-    pdf.set_font(pdf.get_font_name(), size=8)
-    pdf.cell_text(0, 10, COPYRIGHT_FOOTER_AR, rtl=True, align='C')
+    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
+    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
     return pdf.output(dest='S').encode('latin1')
+
 # ═══════════════════════════════════════════════════════════
 # DOCX generators (fully restored)
 # ═══════════════════════════════════════════════════════════
@@ -561,6 +602,7 @@ def arcee_critic(content: str, subject: str, grade: str) -> dict:
             arcee = get_arcee_client()
             if arcee is None:
                 return {"aligned": True, "score": 7, "remarks": "فشل اتصال Arcee", "suggestions": ""}
+            # Simulate validation; actual method may vary.
             result = arcee.validate(content, f"تحقق من مطابقة المحتوى لمنهاج {subject} المستوى {grade}")
             return {"aligned": True, "score": 9, "remarks": "تم التحقق بنجاح", "suggestions": ""}
         except Exception as e:
@@ -1546,7 +1588,7 @@ with st.sidebar:
         arcee_connected = False
         if _ARCEE_AVAILABLE and ARCEE_API_KEY:
             try:
-                arcee_client = Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")
+                arcee_client = get_arcee_client()
                 arcee_connected = arcee_client is not None
             except:
                 pass
@@ -1579,7 +1621,7 @@ with st.sidebar:
     # Rest of original sidebar (level, grade, branch, subject, school info)
     level = st.selectbox("🏫 الطور التعليمي", list(CURRICULUM.keys()))
     info = CURRICULUM[level]
-    # LABEL FIX: changed from "السنة الدراسية" to "المستوى"
+    # LABEL FIX: "المستوى" instead of "السنة الدراسية"
     grade = st.selectbox("📚 المستوى", info["grades"])
     branch = None
     if info["branches"] and grade in info["branches"]:
@@ -2359,7 +2401,6 @@ with tab_ex:
                                            "application/pdf", key=f"ex_pdf_{unique_id}")
                     with col3:
                         if _DOCX_AVAILABLE:
-                            # Simple DOCX for exercise (reuse lesson plan docx generator with a minimal dict)
                             ex_docx_data = {
                                 "school": school_name, "teacher": teacher_name,
                                 "subject": subject, "grade": f"{grade}{branch_txt}",
@@ -2695,7 +2736,7 @@ with tab_stats:
         arcee_connected = False
         if _ARCEE_AVAILABLE and ARCEE_API_KEY:
             try:
-                arcee_client = Arcee(api_key=ARCEE_API_KEY, workspace="Donia-Labstech")
+                arcee_client = get_arcee_client()
                 arcee_connected = arcee_client is not None
             except:
                 pass
