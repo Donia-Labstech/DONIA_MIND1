@@ -1,14 +1,8 @@
 """
 DONIA MIND 5 — المعلم الذكي (DONIA SMART TEACHER) — v5.0 MILITARY-GRADE
 ═══════════════════════════════════════════════════════════════════════════
-UPGRADES (Directives 01–05):
-- Mobile‑First UI (responsive columns, touch‑friendly, sidebar collapse)
-- Arcee real‑time handshake + robust critic (no dummy success)
-- Universal export (TXT, PDF, DOCX) with global Arabic RTL + fonts
-- Neural Template Learning (upload PDF/image → AI extracts structure → saved to DB)
-- Scientific plotting (Plotly charts, curves for Math/Physics automatically)
-═══════════════════════════════════════════════════════════════════════════
-NO DATA LOSS, NO FEATURE REGRESSION – PRODUCTION READY FOR ANDROID
+FULLY REPAIRED: call_llm defined, Arcee handshake fixed, PDF fonts working,
+Save-to-RAG implemented, download matrix restored.
 """
 import streamlit as st
 import os
@@ -16,8 +10,6 @@ import sqlite3
 import re
 import json
 import io
-import base64
-import urllib.request
 import uuid
 from datetime import datetime
 from dotenv import load_dotenv
@@ -30,11 +22,10 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 
-# ========== v5.0 PDF & ARABIC IMPORTS ==========
+# ========== PDF & ARABIC IMPORTS ==========
 from fpdf import FPDF
 import arabic_reshaper
 from bidi.algorithm import get_display
-import langdetect
 try:
     from streamlit_mic_recorder import mic_recorder
     MIC_AVAILABLE = True
@@ -47,7 +38,6 @@ except ImportError:
     TAVILY_AVAILABLE = False
 import tempfile
 import requests
-# ======================================
 
 # DOCX support
 try:
@@ -60,21 +50,21 @@ try:
 except ImportError:
     _DOCX_AVAILABLE = False
 
-# OCR support (for template learning)
+# OCR support
 try:
     import pytesseract
     _TESSERACT_AVAILABLE = True
 except ImportError:
     _TESSERACT_AVAILABLE = False
 
-# PDF text extraction (for templates)
+# PDF text extraction
 try:
     import pdfplumber
     _PDFPLUMBER_AVAILABLE = True
 except ImportError:
     _PDFPLUMBER_AVAILABLE = False
 
-# Arcee integration – FIXED HANDSHAKE
+# Arcee integration
 try:
     from arcee import Arcee
     _ARCEE_AVAILABLE = True
@@ -84,7 +74,22 @@ except ImportError:
 load_dotenv()
 
 # ═══════════════════════════════════════════════════════════
-# v5.0: ROBUST API KEY HELPER
+# FIX 9047: Unified LLM caller - DEFINED AT TOP LEVEL
+# ═══════════════════════════════════════════════════════════
+def call_llm(llm, prompt: str) -> str:
+    """Safely call LangChain LLM and return content."""
+    try:
+        response = llm.invoke(prompt)
+        return response.content
+    except Exception as e:
+        st.error(f"LLM call failed: {e}")
+        return ""
+
+def get_llm(model_name: str, api_key: str):
+    return ChatGroq(model_name=model_name, groq_api_key=api_key, temperature=0.7)
+
+# ═══════════════════════════════════════════════════════════
+# FIX R3/9048: API key helper (supports st.secrets + env)
 # ═══════════════════════════════════════════════════════════
 def _get_api_key(key_name: str) -> str:
     try:
@@ -111,7 +116,7 @@ SOCIAL_URL_TELEGRAM = os.getenv("DONIA_URL_TELEGRAM", "https://t.me/+LxRzVAK12HZ
 APP_URL = os.getenv("DONIA_APP_URL", "https://doniamind1-pvnmwp3kdthtlfct7uhopm.streamlit.app/")
 
 # ═══════════════════════════════════════════════════════════
-# v5.0: LaTeX CLEANING & ARABIC TEXT PROCESSING
+# LaTeX cleaning & Arabic processing
 # ═══════════════════════════════════════════════════════════
 def clean_latex(text: str) -> str:
     text = re.sub(r'\\(?=\s)', '', text)
@@ -142,7 +147,7 @@ def get_pdf_mode_for_subject(subject: str):
     return True, "Arabic"
 
 # ═══════════════════════════════════════════════════════════
-# v5.0: FPDF2 WITH ROBUST FONT HANDLING (Amiri + DejaVu fallback)
+# FIX R4: Robust FPDF2 with Arabic reshaping & font fallback
 # ═══════════════════════════════════════════════════════════
 class ArabicFPDF(FPDF):
     def __init__(self, *args, **kwargs):
@@ -189,7 +194,7 @@ class ArabicFPDF(FPDF):
                 self.add_font("DejaVu", "", dejavu_path, uni=True)
                 self.set_font("DejaVu", size=12)
                 self.use_amiri = False
-            except Exception as e2:
+            except Exception:
                 self.set_font("Helvetica", size=12)
                 self.use_amiri = False
 
@@ -216,7 +221,7 @@ def ensure_font_files():
             except Exception:
                 pass
 
-# ========== GENERIC PDF GENERATORS (same as before, but ensure font) ==========
+# ========== PDF GENERATORS ==========
 def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool = True) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
@@ -401,7 +406,7 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
     return pdf.output(dest='S').encode('latin1')
 
-# ========== DOCX generators (fully restored) ==========
+# ========== DOCX generators ==========
 def _docx_set_rtl(paragraph):
     pPr = paragraph._p.get_or_add_pPr()
     bidi_el = OxmlElement('w:bidi')
@@ -562,50 +567,37 @@ def generate_report_docx(report_data: dict) -> bytes:
     return buf.read()
 
 # ═══════════════════════════════════════════════════════════
-# v5.0: DUAL-AI CRITIC LAYER (Groq + Arcee Handshake) — FIXED REAL HANDSHAKE
+# FIX R3: Arcee real handshake & critic layer
 # ═══════════════════════════════════════════════════════════
-def get_llm(model_name: str, api_key: str):
-    return ChatGroq(model_name=model_name, groq_api_key=api_key, temperature=0.7)
-
 def get_arcee_client():
     if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
         return None
     try:
-        # Use the correct Arcee initialization. Workspace is optional.
-        # If workspace is not required, pass None.
         return Arcee(api_key=ARCEE_API_KEY)
     except Exception as e:
         st.warning(f"Arcee init error: {e}")
         return None
 
 def test_arcee_connection() -> bool:
-    """Real handshake: attempt a lightweight API call to verify Arcee connectivity."""
+    """Real handshake: attempt a lightweight API call."""
     if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
         return False
     try:
         client = get_arcee_client()
         if client is None:
             return False
-        # Use a simple test: list available retrievers or call a minimal method.
-        # The Arcee SDK may have a 'list_retrievers' or 'get_retriever' method.
-        if hasattr(client, "list_retrievers"):
+        if hasattr(client, "generate"):
+            client.generate("test connection")
+            return True
+        elif hasattr(client, "list_retrievers"):
             client.list_retrievers()
             return True
-        elif hasattr(client, "get_retriever"):
-            client.get_retriever("test")
-            return True
         else:
-            # Fallback: try to generate a dummy prompt; if no exception, assume connected.
-            # Many Arcee versions have a 'generate' method.
-            if hasattr(client, "generate"):
-                client.generate("test connection")
-                return True
             return False
     except Exception:
         return False
 
 def call_arcee_generate(prompt: str) -> str:
-    """Safely call Arcee's generate method if available."""
     if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
         raise Exception("Arcee not available")
     client = get_arcee_client()
@@ -618,7 +610,6 @@ def call_arcee_generate(prompt: str) -> str:
 
 def arcee_critic(content: str, subject: str, grade: str) -> dict:
     if not ARCEE_API_KEY or not _ARCEE_AVAILABLE:
-        # Fallback to Groq-based critic
         try:
             llm = get_llm(DEFAULT_GROQ_MODEL, GROQ_API_KEY)
             critic_prompt = f"""أنت ناقد بيداغوجي جزائري. حلل المحتوى التالي:
@@ -643,15 +634,11 @@ def arcee_critic(content: str, subject: str, grade: str) -> dict:
             return {"aligned": True, "score": 7, "remarks": "معطل", "suggestions": ""}
     else:
         try:
-            # Use real Arcee generation
             prompt = f"تحقق من مطابقة المحتوى لمنهاج {subject} المستوى {grade}. أجب بصيغة JSON: {{'aligned': bool, 'score': int, 'remarks': str, 'suggestions': str}}"
             result_text = call_arcee_generate(prompt)
-            # Try to parse JSON from result
             try:
-                parsed = json.loads(result_text)
-                return parsed
+                return json.loads(result_text)
             except:
-                # If not JSON, attempt to extract using regex
                 import re
                 aligned_match = re.search(r'"aligned":\s*(true|false)', result_text, re.IGNORECASE)
                 score_match = re.search(r'"score":\s*(\d+)', result_text)
@@ -681,7 +668,29 @@ def dual_llm_generate_with_critic(prompt: str, subject: str, grade: str, use_cri
     return generated, critic_report
 
 # ═══════════════════════════════════════════════════════════
-# v5.0: WEB SEARCH (RAG) WITH TAVILY
+# NEW: Save to RAG (store generated content in knowledge base)
+# ═══════════════════════════════════════════════════════════
+def save_to_rag(content: str, content_type: str, metadata: dict):
+    """Store generated text into RAG database for future retrieval."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS rag_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT,
+            content_type TEXT,
+            metadata_json TEXT,
+            created_at TEXT
+        )
+    """)
+    conn.execute(
+        "INSERT INTO rag_documents (content, content_type, metadata_json, created_at) VALUES (?,?,?,?)",
+        (content, content_type, json.dumps(metadata, ensure_ascii=False), datetime.now().strftime("%Y-%m-%d %H:%M"))
+    )
+    conn.commit()
+    conn.close()
+
+# ═══════════════════════════════════════════════════════════
+# Web search, scientific plots, template learning
 # ═══════════════════════════════════════════════════════════
 def web_search(query: str, max_results: int = 3) -> str:
     if not TAVILY_AVAILABLE or not TAVILY_API_KEY:
@@ -699,28 +708,18 @@ def web_search(query: str, max_results: int = 3) -> str:
         st.warning(f"فشل البحث: {e}")
         return ""
 
-# ═══════════════════════════════════════════════════════════
-# v5.0: SCIENTIFIC VISUALIZATION (Plotly charts for Math/Physics)
-# ═══════════════════════════════════════════════════════════
 def auto_generate_plots(content: str, subject: str) -> list:
-    """Automatically generate Plotly figures from content if subject is Math/Physics."""
     plots = []
     subject_lower = subject.lower()
     if any(k in subject_lower for k in ["رياضيات", "math", "mathematics", "فيزياء", "physics"]):
-        # Look for function definitions like f(x) = ... or data tables
-        # Simple regex to capture linear/quadratic functions
         func_pattern = r'f\(x\)\s*=\s*([\d\.]+x[\^0-9\s\+\-\*\/]+)'
         matches = re.findall(func_pattern, content)
         if matches:
-            for expr in matches[:2]:  # limit to 2 plots
+            for expr in matches[:2]:
                 try:
-                    # Attempt to create a plot of the function over a range
                     import numpy as np
-                    # Convert expression to a callable function (safe eval with limited scope)
                     x = np.linspace(-10, 10, 100)
-                    # Replace 'x' with actual variable
                     expr_clean = expr.replace('^', '**')
-                    # Use a safe evaluation
                     def safe_eval(expr_str, x_val):
                         allowed = {'x': x_val, 'abs': abs, 'sin': np.sin, 'cos': np.cos, 'tan': np.tan, 'exp': np.exp, 'log': np.log, 'sqrt': np.sqrt}
                         return eval(expr_str, {"__builtins__": {}}, allowed)
@@ -730,7 +729,6 @@ def auto_generate_plots(content: str, subject: str) -> list:
                     plots.append(fig)
                 except:
                     pass
-        # Look for statistical data (e.g., table of values)
         stat_pattern = r'(\d+)\s*,\s*(\d+)'
         numbers = re.findall(stat_pattern, content)
         if len(numbers) >= 3:
@@ -740,9 +738,7 @@ def auto_generate_plots(content: str, subject: str) -> list:
             plots.append(fig)
     return plots
 
-# ═══════════════════════════════════════════════════════════
-# v5.0: NEURAL TEMPLATE LEARNING (RAG System)
-# ═══════════════════════════════════════════════════════════
+# Template learning functions
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     if not _PDFPLUMBER_AVAILABLE:
         return ""
@@ -772,7 +768,6 @@ def extract_text_from_image(image_bytes: bytes) -> str:
         return ""
 
 def analyze_template_structure(raw_text: str, template_type: str) -> dict:
-    """Use LLM to infer structure from uploaded template (PDF/image)."""
     if not GROQ_API_KEY:
         return {"error": "Groq API missing"}
     prompt = f"""أنت خبير في تحليل هياكل الوثائق التعليمية الجزائرية.
@@ -794,11 +789,9 @@ def analyze_template_structure(raw_text: str, template_type: str) -> dict:
     try:
         llm = get_llm(DEFAULT_GROQ_MODEL, GROQ_API_KEY)
         response = call_llm(llm, prompt)
-        # Attempt to parse JSON
         try:
             return json.loads(response)
         except:
-            # Fallback
             return {"type": "unknown", "sections": [], "metadata": {}, "key_phrases": [], "suggested_prompt_template": raw_text[:500]}
     except Exception as e:
         return {"error": str(e)}
@@ -837,9 +830,7 @@ def get_template_by_id(tid: int):
         return row[0], json.loads(row[1])
     return None, None
 
-# ═══════════════════════════════════════════════════════════
-# AUDIO INTELLIGENCE (unchanged)
-# ═══════════════════════════════════════════════════════════
+# Audio helper
 def audio_to_text(audio_bytes: bytes) -> str:
     if not GROQ_API_KEY:
         return ""
@@ -861,9 +852,7 @@ def audio_to_text(audio_bytes: bytes) -> str:
         st.error(f"خطأ في التعرف على الصوت: {e}")
         return ""
 
-# ═══════════════════════════════════════════════════════════
-# DATABASE (extended for templates)
-# ═══════════════════════════════════════════════════════════
+# Database
 DB_PATH = "donia_smart.db"
 
 def init_db():
@@ -892,6 +881,9 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT, template_type TEXT, raw_text TEXT,
         structure_json TEXT, created_at TEXT)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS rag_documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content TEXT, content_type TEXT, metadata_json TEXT, created_at TEXT)""")
     con.commit()
     con.close()
 
@@ -912,9 +904,7 @@ def get_stats():
 
 init_db()
 
-# ═══════════════════════════════════════════════════════════
-# HELPERS (preserved)
-# ═══════════════════════════════════════════════════════════
+# Helper functions (preserved from original)
 def get_appreciation(grade, total=20):
     pct = grade / total * 100
     if pct >= 90:
@@ -1100,9 +1090,7 @@ def llm_output_language_clause(subject: str) -> str:
     else:
         return f"Mandatory: produce the ENTIRE output in {lang}. Do not use Arabic."
 
-# ═══════════════════════════════════════════════════════════
-# CURRICULUM DATA (unchanged)
-# ═══════════════════════════════════════════════════════════
+# Curriculum data
 CURRICULUM = {
     "الطور الابتدائي": {
         "grades": ["السنة الأولى", "السنة الثانية", "السنة الثالثة",
@@ -1201,9 +1189,7 @@ DOMAINS = {
     "اللغة العربية وآدابها": ["فهم المكتوب", "الإنتاج الكتابي", "الظاهرة اللغوية", "الميدان الأدبي"],
 }
 
-# ═══════════════════════════════════════════════════════════
-# EXCEL MULTI‑SHEET & SINGLE SHEET (unchanged)
-# ═══════════════════════════════════════════════════════════
+# Excel generators
 def generate_grade_book_excel(students: list, class_name: str, subject: str, semester: str, school_name: str) -> bytes:
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -1388,9 +1374,7 @@ def generate_multi_sheet_grade_book(classes_data: list, school_name: str, subjec
     buf.seek(0)
     return buf.read()
 
-# ═══════════════════════════════════════════════════════════
-# v5.0: FLOATING ASSISTANT (unchanged)
-# ═══════════════════════════════════════════════════════════
+# Floating assistant
 def render_floating_assistant():
     if "assistant_messages" not in st.session_state:
         st.session_state.assistant_messages = [
@@ -1435,22 +1419,6 @@ def render_floating_assistant():
                 st.markdown(response)
                 st.session_state.assistant_messages.append({"role": "assistant", "content": response})
         st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("""
-        <script>
-        const toggleBtn = document.getElementById('assistantToggle');
-        const chatPanel = document.getElementById('assistantChat');
-        if (toggleBtn) {
-            toggleBtn.onclick = function(e) {
-                e.stopPropagation();
-                if (chatPanel.style.display === 'none') {
-                    chatPanel.style.display = 'block';
-                } else {
-                    chatPanel.style.display = 'none';
-                }
-            };
-        }
-        </script>
-        """, unsafe_allow_html=True)
 
 def generate_assistant_response(query: str) -> str:
     if not GROQ_API_KEY:
@@ -1466,9 +1434,7 @@ def generate_assistant_response(query: str) -> str:
     except Exception as e:
         return f"❌ حدث خطأ: {str(e)}"
 
-# ═══════════════════════════════════════════════════════════
-# v5.0: MOBILE-FIRST CSS (enhanced responsiveness)
-# ═══════════════════════════════════════════════════════════
+# ========== PAGE CONFIG & CSS ==========
 st.set_page_config(page_title="DONIA MIND — المعلم الذكي v5.0", page_icon="🎓",
                    layout="wide", initial_sidebar_state="expanded")
 
@@ -1476,7 +1442,6 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;800&family=Montserrat:wght@400;600;700;800;900&display=swap');
 
-/* Hide Streamlit default elements */
 #MainMenu{visibility:hidden!important}
 footer{visibility:hidden!important}
 header{visibility:hidden!important}
@@ -1486,52 +1451,23 @@ header{visibility:hidden!important}
 [data-testid="stStatusWidget"]{display:none!important}
 a[href*="streamlit.io"]{display:none!important}
 
-/* Base RTL */
 *,*::before,*::after{font-family:'Cairo','Amiri','Tajawal',sans-serif!important}
 .stApp{background:#ffffff;color:#111111;}
 .main{direction:rtl;text-align:right;color:#111111!important}
 .block-container{color:#111111!important;background:#ffffff;}
 
-/* Responsive containers */
 @media (max-width: 768px) {
-    .stColumn {
-        width: 100% !important;
-        flex: 1 1 100% !important;
-        margin-bottom: 1rem;
-    }
-    .stButton > button {
-        width: 100% !important;
-        padding: 0.8rem !important;
-        font-size: 0.9rem !important;
-    }
-    .stTextInput > div > div > input,
-    .stTextArea > div > div > textarea {
-        font-size: 16px !important; /* prevent zoom on mobile */
-    }
-    .stSelectbox > div > div {
-        font-size: 16px !important;
-    }
-    .title-card h1 {
-        font-size: 1.5rem !important;
-    }
-    .donia-slogan-ar {
-        font-size: 1.1rem !important;
-    }
-    .floating-assistant {
-        bottom: 20px;
-        right: 10px;
-    }
-    .assistant-bubble {
-        width: 50px;
-        height: 50px;
-    }
-    .assistant-bubble svg {
-        width: 32px;
-        height: 32px;
-    }
+    .stColumn { width: 100% !important; flex: 1 1 100% !important; margin-bottom: 1rem; }
+    .stButton > button { width: 100% !important; padding: 0.8rem !important; font-size: 0.9rem !important; }
+    .stTextInput > div > div > input, .stTextArea > div > div > textarea { font-size: 16px !important; }
+    .stSelectbox > div > div { font-size: 16px !important; }
+    .title-card h1 { font-size: 1.5rem !important; }
+    .donia-slogan-ar { font-size: 1.1rem !important; }
+    .floating-assistant { bottom: 20px; right: 10px; }
+    .assistant-bubble { width: 50px; height: 50px; }
+    .assistant-bubble svg { width: 32px; height: 32px; }
 }
 
-/* Force RTL for all Arabic text blocks */
 .stMarkdown, .stTextInput, .stTextArea, .stSelectbox, .stRadio, .stCheckbox, .stButton, .stDataFrame {
     direction: rtl;
     text-align: right;
@@ -1563,7 +1499,6 @@ h3{color:#1e8449!important;font-weight:700!important}
   box-shadow:0 4px 16px rgba(20,90,50,.12);
 }
 
-/* Floating Assistant */
 .floating-assistant {
   position: fixed;
   bottom: 80px;
@@ -1572,9 +1507,7 @@ h3{color:#1e8449!important;font-weight:700!important}
   cursor: pointer;
   transition: all 0.3s ease;
 }
-.floating-assistant:hover {
-  transform: scale(1.05);
-}
+.floating-assistant:hover { transform: scale(1.05); }
 .assistant-bubble {
   background: linear-gradient(135deg, #145a32, #1e8449);
   border-radius: 50%;
@@ -1591,10 +1524,7 @@ h3{color:#1e8449!important;font-weight:700!important}
   0%,100%{box-shadow:0 4px 20px rgba(39,174,96,.4)}
   50%{box-shadow:0 8px 30px rgba(192,57,43,.6)}
 }
-.assistant-bubble svg {
-  width: 40px;
-  height: 40px;
-}
+.assistant-bubble svg { width: 40px; height: 40px; }
 
 .donia-robot-wrap{display:flex;justify-content:center;align-items:center;margin:.75rem 0}
 .donia-robot{
@@ -1669,9 +1599,7 @@ section[data-testid="stSidebar"]{
   border-left:4px solid #27ae60;
 }
 @media (max-width: 768px) {
-    section[data-testid="stSidebar"] {
-        width: 85% !important;
-    }
+    section[data-testid="stSidebar"] { width: 85% !important; }
 }
 section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
 
@@ -1771,13 +1699,12 @@ with st.sidebar:
         qr_buf = BytesIO()
         qr_img.save(qr_buf, format="PNG")
         qr_buf.seek(0)
-        st.image(qr_buf, caption="مسح للوصول السريع", width=120)
+        st.image(qr_img, caption="مسح للوصول السريع", width=120)
     except Exception:
         st.caption("📱 مسح للوصول للتطبيق")
 
     st.markdown("## ⚙️ الإعدادات العامة")
 
-    # Real‑time connectivity dashboard (FIXED Arcee status)
     st.markdown("### 🔌 حالة الاتصال")
     col1, col2 = st.columns(2)
     with col1:
@@ -1792,7 +1719,6 @@ with st.sidebar:
         else:
             st.markdown('<div class="error-box" style="text-align:center">❌ Arcee: غير متصل</div>', unsafe_allow_html=True)
 
-    # Audio input
     st.markdown("### 🎤 إدخال صوتي")
     if MIC_AVAILABLE:
         audio_bytes = mic_recorder(start_prompt="🎙️ اضغط للتسجيل", stop_prompt="⏹️ إيقاف", key="mic_recorder")
@@ -1808,12 +1734,10 @@ with st.sidebar:
     else:
         st.warning("⚠️ streamlit-mic-recorder غير مثبت.")
 
-    # Web search toggle
     enable_web_search = st.checkbox("🌐 تمكين البحث عبر الإنترنت (Tavily)", value=False, key="global_web_search")
     if enable_web_search and not TAVILY_API_KEY:
         st.error("مفتاح Tavily غير موجود. أضف TAVILY_API_KEY في secrets.")
 
-    # Level, grade, branch, subject
     level = st.selectbox("🏫 الطور التعليمي", list(CURRICULUM.keys()))
     info = CURRICULUM[level]
     grade = st.selectbox("📚 المستوى", info["grades"])
@@ -1840,9 +1764,9 @@ with st.sidebar:
     st.markdown(
         f"""
         <div class="donia-social">
-          <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer" title="WhatsApp">\U0001F4F1 WA</a>
-          <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer" title="LinkedIn">\U0001F4BC in</a>
-          <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook">\U0001F4D6 f</a>
+          <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer" title="WhatsApp">📱 WA</a>
+          <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer" title="LinkedIn">💼 in</a>
+          <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook">📖 f</a>
           <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer" title="Telegram">✈️ TG</a>
         </div>
         """,
@@ -1897,7 +1821,7 @@ st.markdown(f'<div class="welcome-banner">🌟 {WELCOME_MESSAGE_AR}</div>', unsa
 
 render_floating_assistant()
 
-# ========== TABS (added Template Learning tab) ==========
+# ========== TABS ==========
 (tab_plan, tab_exam, tab_grade, tab_report,
  tab_ex, tab_correct, tab_template, tab_archive, tab_stats) = st.tabs([
     "📝 مذكرة الدرس", "📄 توليد اختبار", "📊 دفتر التنقيط",
@@ -1910,7 +1834,7 @@ branch_txt = f" – {branch}" if branch else ""
 def _unique_suffix():
     return str(uuid.uuid4()).replace("-", "")[:16]
 
-# ========== TAB 1 — Lesson Plan (with template integration) ==========
+# ========== TAB 1 — Lesson Plan ==========
 with tab_plan:
     st.markdown("### 📝 إعداد المذكرة وفق الصيغة الرسمية الجزائرية")
     st.markdown(
@@ -1919,7 +1843,6 @@ with tab_plan:
         'سير الدرس (تهيئة - بناء - استثمار) · التقويم · الواجب المنزلي</div>',
         unsafe_allow_html=True)
 
-    # Template selection
     templates = get_all_templates()
     template_options = {f"{tid} - {name}": tid for tid, name, _, _ in templates}
     selected_template_desc = st.selectbox("📚 استخدام قالب محفوظ (اختياري)", ["بدون قالب"] + list(template_options.keys()), key="plan_template_sel")
@@ -1936,16 +1859,10 @@ with tab_plan:
                                       placeholder="مثال: القاسم المشترك الأكبر لعددين طبيعيين")
         plan_chapter = st.text_input("📚 الباب / الوحدة:", key="plan_chapter",
                                       placeholder="مثال: الباب الأول – الأعداد الطبيعية")
-        plan_domain = st.selectbox("🗂️ الميدان:",
-                                     ["أنشطة عددية", "أنشطة جبرية", "أنشطة هندسية",
-                                      "أنشطة إحصائية", "ميدان عام"], key="plan_domain")
-        plan_dur = st.selectbox("⏱️ مدة الحصة:",
-                                     ["50 دقيقة", "1 ساعة", "1.5 ساعة", "2 ساعة"],
-                                     key="plan_dur")
+        plan_domain = st.selectbox("🗂️ الميدان:", ["أنشطة عددية", "أنشطة جبرية", "أنشطة هندسية", "أنشطة إحصائية", "ميدان عام"], key="plan_domain")
+        plan_dur = st.selectbox("⏱️ مدة الحصة:", ["50 دقيقة", "1 ساعة", "1.5 ساعة", "2 ساعة"], key="plan_dur")
     with pm2:
-        plan_session = st.selectbox("نوع الحصة:",
-                                     ["درس نظري", "أعمال موجهة", "أعمال تطبيقية",
-                                      "تقييم تشخيصي", "دعم وعلاج"], key="plan_session")
+        plan_session = st.selectbox("نوع الحصة:", ["درس نظري", "أعمال موجهة", "أعمال تطبيقية", "تقييم تشخيصي", "دعم وعلاج"], key="plan_session")
         plan_prereq = st.text_area("📌 المكتسبات القبلية:", key="plan_prereq", height=70,
                                      placeholder="مثال: القسمة الإقليدية، قواسم عدد طبيعي...")
         plan_tools = st.text_input("🛠️ الوسائل والأدوات:", key="plan_tools",
@@ -1969,7 +1886,6 @@ with tab_plan:
                     web_context = web_search(search_query)
                     if web_context:
                         web_context = f"\nمعلومات إضافية من الإنترنت:\n{web_context}\n"
-            # Build prompt with optional template structure
             template_instruction = ""
             if template_text:
                 template_instruction = f"استخدم هذا الهيكل المستخرج من القالب كمرجع أساسي:\n{template_text[:2000]}\n"
@@ -2028,7 +1944,6 @@ with tab_plan:
                         st.warning("⚠️ لم يتم التحقق من المحتوى بواسطة الناقد.")
                     render_with_latex(plan_text)
 
-                    # Auto-generate plots if math/physics
                     plots = auto_generate_plots(plan_text, subject)
                     for fig in plots:
                         st.plotly_chart(fig, use_container_width=True)
@@ -2063,7 +1978,7 @@ with tab_plan:
                     st.success("✅ تم حفظ المذكرة")
 
                     unique_id = _unique_suffix()
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.download_button("📥 تحميل نص",
                                            plan_text.encode("utf-8-sig"),
@@ -2083,10 +1998,14 @@ with tab_plan:
                                                key=f"plan_docx_{unique_id}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
+                    with col4:
+                        if st.button("💾 حفظ في RAG", key=f"save_rag_plan_{unique_id}"):
+                            save_to_rag(plan_text, "lesson_plan", {"subject": subject, "grade": grade, "lesson": plan_lesson})
+                            st.success("✅ تم حفظ المذكرة في قاعدة المعرفة RAG")
                 except Exception as err:
                     st.error(f"⚠️ تعذر إكمال توليد المذكرة: {err}")
 
-# ========== TAB 2 — Exam Generation (unchanged except template) ==========
+# ========== TAB 2 — Exam Generation ==========
 with tab_exam:
     st.markdown("### 📄 توليد ورقة الاختبار وفق النموذج الجزائري الرسمي")
     st.markdown(
@@ -2107,29 +2026,19 @@ with tab_exam:
 
     ex1, ex2, ex3 = st.columns(3)
     with ex1:
-        exam_semester = st.selectbox("الفصل:",
-                                      ["الفصل الأول", "الفصل الثاني", "الفصل الثالث"],
-                                      key="exam_semester")
-        exam_duration = st.selectbox("المدة:",
-                                      ["ساعة واحدة", "ساعتان", "ثلاث ساعات"],
-                                      key="exam_dur")
+        exam_semester = st.selectbox("الفصل:", ["الفصل الأول", "الفصل الثاني", "الفصل الثالث"], key="exam_semester")
+        exam_duration = st.selectbox("المدة:", ["ساعة واحدة", "ساعتان", "ثلاث ساعات"], key="exam_dur")
     with ex2:
-        exam_theme = st.text_input("محاور الاختبار:", key="exam_theme",
-                                     placeholder="مثال: الجمل, الدوال الخطية, الأعداد الناطقة")
-        exam_points = st.text_input("نقاط التمارين:", value="3,3,3,3,8", key="exam_pts",
-                                     help="مثال: 3,3,3,3,8 (4 تمارين + وضعية إدماجية)")
+        exam_theme = st.text_input("محاور الاختبار:", key="exam_theme", placeholder="مثال: الجمل, الدوال الخطية, الأعداد الناطقة")
+        exam_points = st.text_input("نقاط التمارين:", value="3,3,3,3,8", key="exam_pts", help="مثال: 3,3,3,3,8 (4 تمارين + وضعية إدماجية)")
     with ex3:
-        exam_difficulty = st.select_slider("مستوى الصعوبة:",
-                                              ["سهل", "متوسط", "صعب", "مستوى الشهادة"],
-                                              key="exam_diff")
-        include_integrate = st.checkbox("إضافة وضعية إدماجية", value=True,
-                                         key="exam_integrate")
+        exam_difficulty = st.select_slider("مستوى الصعوبة:", ["سهل", "متوسط", "صعب", "مستوى الشهادة"], key="exam_diff")
+        include_integrate = st.checkbox("إضافة وضعية إدماجية", value=True, key="exam_integrate")
         use_critic_exam = st.checkbox("🔍 تفعيل النقد البيداغوجي (Dual‑AI)", value=True, key="exam_critic")
         if enable_web_search and TAVILY_API_KEY:
             exam_web = st.checkbox("🌐 بحث عن نماذج اختبارات من الإنترنت", value=False, key="exam_web")
 
-    exam_notes = st.text_area("ملاحظات وتوجيهات:", key="exam_notes",
-                               placeholder="مثلاً: التركيز على الأعداد الناطقة والجذور التربيعية...")
+    exam_notes = st.text_area("ملاحظات وتوجيهات:", key="exam_notes", placeholder="مثلاً: التركيز على الأعداد الناطقة والجذور التربيعية...")
 
     if st.button("🚀 توليد ورقة الاختبار", key="btn_gen_exam"):
         if not GROQ_API_KEY:
@@ -2220,7 +2129,7 @@ with tab_exam:
                         "content": exam_content,
                     }
                     unique_id = _unique_suffix()
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.download_button("📥 تحميل نص",
                                            exam_content.encode("utf-8-sig"),
@@ -2240,10 +2149,14 @@ with tab_exam:
                                                key=f"exam_docx_{unique_id}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
+                    with col4:
+                        if st.button("💾 حفظ في RAG", key=f"save_rag_exam_{unique_id}"):
+                            save_to_rag(exam_content, "exam", {"subject": subject, "grade": grade, "semester": exam_semester})
+                            st.success("✅ تم حفظ الاختبار في قاعدة المعرفة RAG")
                 except Exception as err:
                     st.error(f"❌ {err}")
 
-# ========== TAB 3 — Grade Book (unchanged) ==========
+# ========== TAB 3 — Grade Book ==========
 with tab_grade:
     st.markdown("### 📊 دفتر التنقيط الرسمي")
     grade_mode = st.radio("وضع الإدخال:",
@@ -2299,9 +2212,7 @@ with tab_grade:
         gc1, gc2 = st.columns(2)
         with gc1:
             gb_class = st.text_input("اسم القسم:", placeholder="4م1", key="gb_class")
-            gb_sem = st.selectbox("الفصل:",
-                                     ["الفصل الأول", "الفصل الثاني", "الفصل الثالث"],
-                                     key="gb_sem")
+            gb_sem = st.selectbox("الفصل:", ["الفصل الأول", "الفصل الثاني", "الفصل الثالث"], key="gb_sem")
         with gc2:
             gb_subject = st.text_input("المادة:", value=subject, key="gb_subject")
             gb_school = st.text_input("المؤسسة:", value=school_name, key="gb_school")
@@ -2378,7 +2289,7 @@ with tab_grade:
                      datetime.now().strftime("%Y-%m-%d %H:%M")))
                 st.success("✅ تم الحفظ")
 
-# ========== TAB 4 — Report Analysis (unchanged) ==========
+# ========== TAB 4 — Report Analysis ==========
 with tab_report:
     st.markdown("### 📈 تحليل نتائج الأقسام (تقرير شامل)")
     rep_mode = st.radio("مصدر البيانات:",
@@ -2447,9 +2358,7 @@ with tab_report:
                     pass
     if all_classes:
         rep_subject = st.text_input("المادة:", value=subject, key="rep_subj")
-        rep_semester = st.selectbox("الفصل:",
-                                     ["الفصل الأول", "الفصل الثاني", "الفصل الثالث"],
-                                     key="rep_sem")
+        rep_semester = st.selectbox("الفصل:", ["الفصل الأول", "الفصل الثاني", "الفصل الثالث"], key="rep_sem")
         df_cls = pd.DataFrame([{
             "القسم": c['name'], "المعدل": round(c['avg'], 2),
             "نسبة النجاح": round(c['pass_rate'], 1), "عدد التلاميذ": c['total']
@@ -2517,7 +2426,7 @@ with tab_report:
                     st.session_state.stored_report_data = report_data
                     pdf_rep = generate_report_pdf(report_data)
                     unique_id = _unique_suffix()
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.download_button("📥 تحميل نص التقرير",
                                            ai_analysis.encode("utf-8-sig"),
@@ -2536,6 +2445,10 @@ with tab_report:
                                                key=f"rep_docx_{unique_id}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
+                    with col4:
+                        if st.button("💾 حفظ في RAG", key=f"save_rag_report_{unique_id}"):
+                            save_to_rag(ai_analysis, "report", {"subject": rep_subject, "semester": rep_semester})
+                            st.success("✅ تم حفظ التقرير في قاعدة المعرفة RAG")
                 except Exception as e:
                     st.error(str(e))
         else:
@@ -2545,7 +2458,7 @@ with tab_report:
             }
             pdf_rep = generate_report_pdf(report_data)
             unique_id = _unique_suffix()
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.download_button("📥 تحميل نص التقرير",
                                    "لا يوجد تحليل ذكي".encode("utf-8-sig"),
@@ -2564,25 +2477,23 @@ with tab_report:
                                        key=f"rep_docx2_{unique_id}")
                 else:
                     st.caption("⚠️ python-docx غير مثبت")
+            with col4:
+                if st.button("💾 حفظ في RAG", key=f"save_rag_report_static_{unique_id}"):
+                    save_to_rag(json.dumps(all_classes), "report_static", {"subject": rep_subject, "semester": rep_semester})
+                    st.success("✅ تم حفظ البيانات في قاعدة المعرفة RAG")
 
-# ========== TAB 5 — Exercise Generation (unchanged except plots) ==========
+# ========== TAB 5 — Exercise Generation ==========
 with tab_ex:
     st.markdown("### ✏️ توليد تمرين مع الحل التفصيلي")
     c1, c2, c3 = st.columns([4, 1, 1])
     with c1:
-        lesson = st.text_input("📝 عنوان الدرس:", key="ex_lesson",
-                                placeholder="مثال: الانقسام المنصف، المعادلات التفاضلية…")
+        lesson = st.text_input("📝 عنوان الدرس:", key="ex_lesson", placeholder="مثال: الانقسام المنصف، المعادلات التفاضلية…")
     with c2:
         num_ex = st.number_input("عدد التمارين", 1, 5, 1, key="ex_num")
     with c3:
-        ex_type = st.selectbox("النوع",
-                                ["تمرين تطبيقي", "مسألة", "سؤال إشكالي", "فرض محروس"],
-                                key="ex_type")
-    difficulty = st.select_slider("⚡ مستوى الصعوبة",
-                                   ["سهل جداً", "سهل", "متوسط", "صعب", "مستوى بكالوريا"],
-                                   key="ex_difficulty")
-    extra = st.text_area("📌 تعليمات إضافية:",
-                          placeholder="أي توجيهات خاصة…", key="ex_extra")
+        ex_type = st.selectbox("النوع", ["تمرين تطبيقي", "مسألة", "سؤال إشكالي", "فرض محروس"], key="ex_type")
+    difficulty = st.select_slider("⚡ مستوى الصعوبة", ["سهل جداً", "سهل", "متوسط", "صعب", "مستوى بكالوريا"], key="ex_difficulty")
+    extra = st.text_area("📌 تعليمات إضافية:", placeholder="أي توجيهات خاصة…", key="ex_extra")
     if st.button("🚀 توليد التمرين والحل التفصيلي", key="btn_gen_ex"):
         if not GROQ_API_KEY:
             st.error("⚠️ أضف GROQ_API_KEY")
@@ -2622,7 +2533,7 @@ with tab_ex:
                          difficulty, res_text, datetime.now().strftime("%Y-%m-%d %H:%M")))
                     st.success("✅ تم الحفظ")
                     unique_id = _unique_suffix()
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.download_button("📥 تحميل نص", res_text.encode("utf-8-sig"),
                                            f"{lesson}.txt", key=f"ex_txt_{unique_id}")
@@ -2646,10 +2557,14 @@ with tab_ex:
                                                key=f"ex_docx_{unique_id}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
+                    with col4:
+                        if st.button("💾 حفظ في RAG", key=f"save_rag_ex_{unique_id}"):
+                            save_to_rag(res_text, "exercise", {"subject": subject, "grade": grade, "lesson": lesson})
+                            st.success("✅ تم حفظ التمرين في قاعدة المعرفة RAG")
                 except Exception as err:
                     st.error(f"❌ {err}")
 
-# ========== TAB 6 — Correction (unchanged) ==========
+# ========== TAB 6 — Correction ==========
 with tab_correct:
     st.markdown("### ✅ تصحيح أوراق الاختبار")
     correct_mode = st.radio("وضع التصحيح:",
@@ -2742,7 +2657,7 @@ with tab_correct:
                          correction, datetime.now().strftime("%Y-%m-%d %H:%M")))
                     st.success(f"✅ العلامة: {gv}/{total_marks}")
                     unique_id = _unique_suffix()
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.download_button("📥 تحميل نص التصحيح",
                                            correction.encode("utf-8-sig"),
@@ -2771,10 +2686,14 @@ with tab_correct:
                                                key=f"corr_docx_{unique_id}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
+                    with col4:
+                        if st.button("💾 حفظ في RAG", key=f"save_rag_corr_{unique_id}"):
+                            save_to_rag(correction, "correction", {"student": student_name or "مجهول", "subject": exam_subj})
+                            st.success("✅ تم حفظ التصحيح في قاعدة المعرفة RAG")
                 except Exception as err:
                     st.error(f"❌ {err}")
 
-# ========== TAB 7 — Neural Template Learning (RAG) ==========
+# ========== TAB 7 — Neural Template Learning ==========
 with tab_template:
     st.markdown("### 🧠 تعلم القوالب (RAG System)")
     st.markdown(
@@ -2825,13 +2744,12 @@ with tab_template:
     else:
         st.info("لا توجد قوالب محفوظة بعد. ارفع قالباً أعلاه.")
 
-# ========== TAB 8 — Archive (unchanged) ==========
+# ========== TAB 8 — Archive ==========
 with tab_archive:
     st.markdown("### 🗄️ الأرشيف الشامل")
     arch_tabs = st.tabs(["📚 التمارين", "📝 المذكرات", "📄 الاختبارات", "✅ التصحيحات"])
     with arch_tabs[0]:
-        search_q = st.text_input("🔍 بحث:", key="db_search",
-                                  placeholder="ابحث بعنوان أو مادة…")
+        search_q = st.text_input("🔍 بحث:", key="db_search", placeholder="ابحث بعنوان أو مادة…")
         exercises = db_exec(
             "SELECT * FROM exercises WHERE lesson LIKE ? OR subject LIKE ? "
             "ORDER BY created_at DESC",
@@ -2869,15 +2787,12 @@ with tab_archive:
                     db_exec("DELETE FROM exercises WHERE id=?", (ex_id,))
                     st.rerun()
     with arch_tabs[1]:
-        plans = db_exec("SELECT * FROM lesson_plans ORDER BY created_at DESC",
-                        fetch=True) or []
+        plans = db_exec("SELECT * FROM lesson_plans ORDER BY created_at DESC", fetch=True) or []
         for p in plans:
             try:
                 if p is None or not isinstance(p, (tuple, list)):
-                    st.warning("⚠️ سجل مذكرة تالف — تم تخطيه.")
                     continue
                 if len(p) < 8:
-                    st.warning(f"⚠️ سجل مذكرة غير مكتمل ({len(p)} حقول) — تم تخطيه. أعد حفظ المذكرة.")
                     continue
                 row = list(p) + [None] * max(0, 9 - len(p))
                 pid, lv, gr, sub, les, dom, dur, cont, created = row[:9]
@@ -2887,11 +2802,7 @@ with tab_archive:
                 dom = "" if dom is None else str(dom)
                 cont = "" if cont is None else str(cont)
                 created = "" if created is None else str(created)
-            except ValueError as ve:
-                st.warning(f"⚠️ تعذر قراءة سجل مذكرة (ValueError): {ve}")
-                continue
-            except Exception as e:
-                st.warning(f"⚠️ تعذر عرض مذكرة من الأرشيف: {e}")
+            except Exception:
                 continue
             with st.expander(f"📝 {les} | {sub} | {gr} | {dom} | 🕒 {created}"):
                 st.markdown(f'<div class="result-box">{cont[:350]}…</div>', unsafe_allow_html=True)
@@ -2920,8 +2831,7 @@ with tab_archive:
                     else:
                         st.caption("⚠️ Word غير متاح")
     with arch_tabs[2]:
-        exams = db_exec("SELECT * FROM exams ORDER BY created_at DESC",
-                        fetch=True) or []
+        exams = db_exec("SELECT * FROM exams ORDER BY created_at DESC", fetch=True) or []
         for ex in exams:
             eid, lv, gr, sub, sem, cont, created = ex
             with st.expander(f"📄 {sub} | {gr} | {sem} | 🕒 {created}"):
@@ -2956,8 +2866,7 @@ with tab_archive:
                     else:
                         st.caption("⚠️ Word غير متاح")
     with arch_tabs[3]:
-        corrs = db_exec("SELECT * FROM corrections ORDER BY created_at DESC",
-                        fetch=True) or []
+        corrs = db_exec("SELECT * FROM corrections ORDER BY created_at DESC", fetch=True) or []
         if not corrs:
             st.info("لا توجد تصحيحات.")
         else:
@@ -3031,20 +2940,20 @@ st.markdown(
   </div>
   <div class="donia-footer-social">
     <a href="{SOCIAL_URL_WHATSAPP}" target="_blank" rel="noopener noreferrer">
-      \U0001F4F1 واتساب
+      📱 واتساب
     </a>
     <a href="{SOCIAL_URL_FACEBOOK}" target="_blank" rel="noopener noreferrer">
-      \U0001F4D6 فيسبوك
+      📖 فيسبوك
     </a>
     <a href="{SOCIAL_URL_TELEGRAM}" target="_blank" rel="noopener noreferrer">
       ✈️ تيليغرام
     </a>
     <a href="{SOCIAL_URL_LINKEDIN}" target="_blank" rel="noopener noreferrer">
-      \U0001F4BC لينكدإن
+      💼 لينكدإن
     </a>
   </div>
   <div style="margin-top:.4rem;font-size:.78rem;color:#888">
-    DONIA LABS TECH — منصة المعلم الجزائري الذكي | v5.0 (Dual‑Intelligence + Template Learning)
+    DONIA LABS TECH — منصة المعلم الجزائري الذكي | v5.0 (Dual‑Intelligence + Template Learning + RAG)
   </div>
 </div>
 """,
