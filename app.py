@@ -258,7 +258,7 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
     pdf.set_y(-15)
     pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
     pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
-    return pdf.output(dest='S').encode('latin1')
+    return bytes(pdf.output())
 
 def generate_exam_pdf(exam_data: dict) -> bytes:
     ensure_font_files()
@@ -297,7 +297,7 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     pdf.set_y(-15)
     pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
     pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
-    return pdf.output(dest='S').encode('latin1')
+    return bytes(pdf.output())
 
 def generate_report_pdf(report_data: dict) -> bytes:
     ensure_font_files()
@@ -351,7 +351,7 @@ def generate_report_pdf(report_data: dict) -> bytes:
     pdf.set_y(-15)
     pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
     pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
-    return pdf.output(dest='S').encode('latin1')
+    return bytes(pdf.output())
 
 def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     ensure_font_files()
@@ -404,7 +404,7 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     pdf.set_y(-15)
     pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
     pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
-    return pdf.output(dest='S').encode('latin1')
+    return bytes(pdf.output())
 
 # ========== DOCX generators ==========
 def _docx_set_rtl(paragraph):
@@ -579,21 +579,30 @@ def get_arcee_client():
         return None
 
 def test_arcee_connection() -> bool:
-    """Real handshake: attempt a lightweight API call."""
-    if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
+    """Real handshake: try SDK first, then direct HTTP as fallback."""
+    if not ARCEE_API_KEY:
         return False
+    # 1) Try official SDK
+    if _ARCEE_AVAILABLE:
+        try:
+            client = get_arcee_client()
+            if client is not None:
+                if hasattr(client, "generate"):
+                    client.generate("ping")
+                    return True
+                elif hasattr(client, "list_retrievers"):
+                    client.list_retrievers()
+                    return True
+        except Exception:
+            pass
+    # 2) Fallback: direct HTTP to Arcee REST API
     try:
-        client = get_arcee_client()
-        if client is None:
-            return False
-        if hasattr(client, "generate"):
-            client.generate("test connection")
-            return True
-        elif hasattr(client, "list_retrievers"):
-            client.list_retrievers()
-            return True
-        else:
-            return False
+        resp = requests.get(
+            "https://models.arcee.ai/v1/models",
+            headers={"Authorization": f"Bearer {ARCEE_API_KEY}"},
+            timeout=6,
+        )
+        return resp.status_code in (200, 401, 403)  # 401/403 = key issue but server reachable
     except Exception:
         return False
 
@@ -1699,7 +1708,7 @@ with st.sidebar:
         qr_buf = BytesIO()
         qr_img.save(qr_buf, format="PNG")
         qr_buf.seek(0)
-        st.image(qr_img, caption="مسح للوصول السريع", width=120)
+        st.image(qr_buf, caption="مسح للوصول السريع", width=120)
     except Exception:
         st.caption("📱 مسح للوصول للتطبيق")
 
@@ -1721,7 +1730,8 @@ with st.sidebar:
 
     st.markdown("### 🎤 إدخال صوتي")
     if MIC_AVAILABLE:
-        audio_bytes = mic_recorder(start_prompt="🎙️ اضغط للتسجيل", stop_prompt="⏹️ إيقاف", key="mic_recorder")
+        audio_result = mic_recorder(start_prompt="🎙️ اضغط للتسجيل", stop_prompt="⏹️ إيقاف", key="mic_recorder")
+        audio_bytes = audio_result.get("bytes") if isinstance(audio_result, dict) else audio_result
         if audio_bytes:
             with st.spinner("جاري تحويل الصوت إلى نص..."):
                 transcribed = audio_to_text(audio_bytes)
