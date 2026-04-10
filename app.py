@@ -150,58 +150,128 @@ def get_pdf_mode_for_subject(subject: str):
 # FIX R4: Robust FPDF2 with Arabic reshaping & font fallback
 # ═══════════════════════════════════════════════════════════
 class ArabicFPDF(FPDF):
+    """
+    FIXED v5.1: Robust Unicode font loader.
+    Priority: Amiri (CDN) → system DejaVu → bundled DejaVu (CDN) → safe fallback.
+    Never passes Arabic text to a non-Unicode font.
+    """
+    # System font search paths (Streamlit Cloud = Ubuntu 22)
+    _SYSTEM_DEJAVU = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ]
+    _AMIRI_URLS = [
+        ("https://cdn.jsdelivr.net/gh/google/fonts/ofl/amiri/Amiri-Regular.ttf",
+         "https://cdn.jsdelivr.net/gh/google/fonts/ofl/amiri/Amiri-Bold.ttf"),
+        ("https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Regular.ttf",
+         "https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Bold.ttf"),
+    ]
+    _DEJAVU_URLS = [
+        "https://cdn.jsdelivr.net/gh/dejavu-fonts/dejavu-fonts/ttf/DejaVuSans.ttf",
+        "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf",
+    ]
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.use_amiri = False
+        self._active_font = "Helvetica"
+        self.has_unicode = False
+
         base_dir = os.path.dirname(os.path.abspath(__file__))
         font_dir = os.path.join(base_dir, "fonts")
         os.makedirs(font_dir, exist_ok=True)
-        reg_path = os.path.join(font_dir, "Amiri-Regular.ttf")
+        reg_path  = os.path.join(font_dir, "Amiri-Regular.ttf")
         bold_path = os.path.join(font_dir, "Amiri-Bold.ttf")
-        dejavu_path = os.path.join(font_dir, "DejaVuSans.ttf")
-        self.use_amiri = False
+        deja_path = os.path.join(font_dir, "DejaVuSans.ttf")
 
-        # Download Amiri if missing
-        if not os.path.exists(reg_path) or os.path.getsize(reg_path) < 100000:
-            try:
-                r = requests.get("https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Regular.ttf", timeout=10)
-                with open(reg_path, "wb") as f:
-                    f.write(r.content)
-            except:
-                pass
-        if not os.path.exists(bold_path) or os.path.getsize(bold_path) < 100000:
-            try:
-                r = requests.get("https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Bold.ttf", timeout=10)
-                with open(bold_path, "wb") as f:
-                    f.write(r.content)
-            except:
-                pass
+        # ── Step 1: try to download Amiri ──
+        if not os.path.exists(reg_path) or os.path.getsize(reg_path) < 100_000:
+            for url_r, url_b in self._AMIRI_URLS:
+                try:
+                    r = requests.get(url_r, timeout=12)
+                    if r.status_code == 200 and len(r.content) > 100_000:
+                        open(reg_path, "wb").write(r.content)
+                        rb = requests.get(url_b, timeout=12)
+                        if rb.status_code == 200:
+                            open(bold_path, "wb").write(rb.content)
+                        break
+                except Exception:
+                    continue
 
-        try:
-            if os.path.exists(reg_path) and os.path.getsize(reg_path) > 100000:
-                self.add_font("Amiri", "", reg_path, uni=True)
-                self.add_font("Amiri", "B", bold_path, uni=True)
+        # ── Step 2: try to load Amiri ──
+        if os.path.exists(reg_path) and os.path.getsize(reg_path) > 100_000:
+            try:
+                self.add_font("Amiri", "", reg_path)
+                b_src = bold_path if os.path.exists(bold_path) and os.path.getsize(bold_path) > 100_000 else reg_path
+                self.add_font("Amiri", "B", b_src)
                 self.set_font("Amiri", size=12)
                 self.use_amiri = True
-            else:
-                raise Exception("Amiri font missing")
-        except Exception:
-            try:
-                if not os.path.exists(dejavu_path):
-                    url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf"
-                    r = requests.get(url, timeout=10)
-                    with open(dejavu_path, "wb") as f:
-                        f.write(r.content)
-                self.add_font("DejaVu", "", dejavu_path, uni=True)
-                self.set_font("DejaVu", size=12)
-                self.use_amiri = False
+                self._active_font = "Amiri"
+                self.has_unicode = True
+                return
             except Exception:
-                self.set_font("Helvetica", size=12)
-                self.use_amiri = False
+                pass
+
+        # ── Step 3: try system DejaVu (often present on Ubuntu/Streamlit Cloud) ──
+        for sys_path in self._SYSTEM_DEJAVU:
+            if os.path.exists(sys_path):
+                try:
+                    self.add_font("DejaVu", "", sys_path)
+                    self.set_font("DejaVu", size=12)
+                    self._active_font = "DejaVu"
+                    self.has_unicode = True
+                    return
+                except Exception:
+                    continue
+
+        # ── Step 4: download DejaVu ──
+        if not os.path.exists(deja_path) or os.path.getsize(deja_path) < 200_000:
+            for url in self._DEJAVU_URLS:
+                try:
+                    r = requests.get(url, timeout=12)
+                    if r.status_code == 200 and len(r.content) > 200_000:
+                        open(deja_path, "wb").write(r.content)
+                        break
+                except Exception:
+                    continue
+        if os.path.exists(deja_path) and os.path.getsize(deja_path) > 200_000:
+            try:
+                self.add_font("DejaVu", "", deja_path)
+                self.set_font("DejaVu", size=12)
+                self._active_font = "DejaVu"
+                self.has_unicode = True
+                return
+            except Exception:
+                pass
+
+        # ── Step 5: last resort – Helvetica (ASCII only, Arabic will be skipped) ──
+        self.set_font("Helvetica", size=12)
+        self._active_font = "Helvetica"
+        self.has_unicode = False
+
+    def _safe_text(self, text: str, rtl: bool = True) -> str:
+        """Return text safe for current font. If no Unicode font, strip non-ASCII."""
+        if self.has_unicode:
+            return reshape_arabic(text) if rtl else text
+        # Fallback: keep only printable ASCII to avoid crash
+        return re.sub(r'[^\x20-\x7E]', '?', text)
+
+    def _font(self, bold: bool = False) -> str:
+        if self._active_font == "Amiri":
+            return "Amiri"
+        if self._active_font == "DejaVu":
+            return "DejaVu"
+        return "Helvetica"
+
+    def set_sized_font(self, size: int, bold: bool = False):
+        style = "B" if bold and self._active_font == "Amiri" else ""
+        self.set_font(self._font(), style, size)
 
     def multi_cell_text(self, text, w, align='R', rtl=True):
-        if rtl:
-            text = reshape_arabic(text)
-        self.multi_cell(w, 6, text, border=0, align=align)
+        safe = self._safe_text(text, rtl)
+        self.multi_cell(w, 6, safe, border=0, align=align)
 
 def ensure_font_files():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -226,38 +296,32 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=14)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=14)
+    pdf.set_sized_font(14)
     if rtl:
-        pdf.cell(0, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
-        pdf.cell(0, 8, reshape_arabic("وزارة التربية الوطنية"), ln=True, align='C')
-        pdf.cell(0, 8, reshape_arabic(f"DONIA MIND — {title}"), ln=True, align='C')
+        pdf.cell(0, 8, pdf._safe_text("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
+        pdf.cell(0, 8, pdf._safe_text("وزارة التربية الوطنية"), ln=True, align='C')
+        pdf.cell(0, 8, pdf._safe_text(f"DONIA MIND — {title}"), ln=True, align='C')
     else:
         pdf.cell(0, 8, "Algerian Democratic Republic", ln=True, align='C')
         pdf.cell(0, 8, "Ministry of Education", ln=True, align='C')
         pdf.cell(0, 8, f"DONIA MIND — {title}", ln=True, align='C')
     pdf.ln(5)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=11)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
+    pdf.set_sized_font(11)
     for line in content.splitlines():
         line = line.strip()
         if not line:
             pdf.ln(3)
             continue
         if line.startswith("##"):
-            pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), 'B', 12)
+            pdf.set_sized_font(12, bold=True)
             pdf.multi_cell_text(line[2:], 190, align='R' if rtl else 'L', rtl=rtl)
-            pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=11)
+            pdf.set_sized_font(11)
         else:
             pdf.multi_cell_text(line, 190, align='R' if rtl else 'L', rtl=rtl)
         pdf.ln(2)
     pdf.set_y(-15)
-    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
-    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
+    pdf.set_sized_font(8)
+    pdf.cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
     return bytes(pdf.output())
 
 def generate_exam_pdf(exam_data: dict) -> bytes:
@@ -282,10 +346,7 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     title = f"اختبار {exam_data.get('semester', '')} في مادة {subj}" if rtl else f"Exam — {exam_data.get('semester', '')} — {subj}"
     pdf.cell(0, 10, reshape_arabic(title) if rtl else title, ln=True, align='C')
     pdf.ln(5)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=11)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
+    pdf.set_sized_font(11)
     content = exam_data.get("content", "")
     for line in content.splitlines():
         line = line.strip()
@@ -295,8 +356,8 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
         pdf.multi_cell_text(line, 190, align='R' if rtl else 'L', rtl=rtl)
         pdf.ln(1)
     pdf.set_y(-15)
-    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
-    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
+    pdf.set_sized_font(8)
+    pdf.cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
     return bytes(pdf.output())
 
 def generate_report_pdf(report_data: dict) -> bytes:
@@ -349,7 +410,7 @@ def generate_report_pdf(report_data: dict) -> bytes:
             if line.strip():
                 pdf.multi_cell_text(line, 190, align='R', rtl=True)
     pdf.set_y(-15)
-    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
+    pdf.set_sized_font(8)
     pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
     return bytes(pdf.output())
 
@@ -357,10 +418,7 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=11)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
+    pdf.set_sized_font(11)
     pdf.cell(0, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
     pdf.cell(0, 8, reshape_arabic("وزارة التربية الوطنية"), ln=True, align='C')
     pdf.ln(4)
@@ -402,7 +460,7 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
         pdf.cell(47.5, 40, reshape_arabic(row[3]), border=1)
         pdf.ln()
     pdf.set_y(-15)
-    pdf.set_font("Amiri" if pdf.use_amiri else ("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica"), size=8)
+    pdf.set_sized_font(8)
     pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
     return bytes(pdf.output())
 
@@ -579,10 +637,13 @@ def get_arcee_client():
         return None
 
 def test_arcee_connection() -> bool:
-    """Real handshake: try SDK first, then direct HTTP as fallback."""
+    """
+    FIXED: Try SDK first; fall back to direct HTTP REST probe.
+    Returns True if the key is valid / server reachable.
+    """
     if not ARCEE_API_KEY:
         return False
-    # 1) Try official SDK
+    # 1) SDK path
     if _ARCEE_AVAILABLE:
         try:
             client = get_arcee_client()
@@ -595,16 +656,23 @@ def test_arcee_connection() -> bool:
                     return True
         except Exception:
             pass
-    # 2) Fallback: direct HTTP to Arcee REST API
-    try:
-        resp = requests.get(
-            "https://models.arcee.ai/v1/models",
-            headers={"Authorization": f"Bearer {ARCEE_API_KEY}"},
-            timeout=6,
-        )
-        return resp.status_code in (200, 401, 403)  # 401/403 = key issue but server reachable
-    except Exception:
-        return False
+    # 2) Direct HTTP probe (works even without SDK)
+    for endpoint in [
+        "https://models.arcee.ai/v1/models",
+        "https://api.arcee.ai/v2/models",
+    ]:
+        try:
+            resp = requests.get(
+                endpoint,
+                headers={"Authorization": f"Bearer {ARCEE_API_KEY}"},
+                timeout=7,
+            )
+            # 200 = OK, 401/403 = auth error but server alive = key issue not network
+            if resp.status_code in (200, 401, 403):
+                return resp.status_code == 200
+        except Exception:
+            continue
+    return False
 
 def call_arcee_generate(prompt: str) -> str:
     if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
@@ -697,6 +765,75 @@ def save_to_rag(content: str, content_type: str, metadata: dict):
     )
     conn.commit()
     conn.close()
+
+# ═══════════════════════════════════════════════════════════
+# FIX: Excel text export — generates a styled .xlsx from
+#      any generated text content (lesson plan / exam / exercise)
+# ═══════════════════════════════════════════════════════════
+def generate_text_excel(content: str, title: str, metadata: dict) -> bytes:
+    """Wrap generated text into a styled Excel workbook."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "المحتوى"
+    ws.sheet_view.rightToLeft = True
+
+    header_font  = Font(name="Arial", bold=True, size=13, color="FFFFFF")
+    meta_font    = Font(name="Arial", bold=True, size=11, color="145A32")
+    body_font    = Font(name="Arial", size=11)
+    center       = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    right        = Alignment(horizontal="right",  vertical="top",    wrap_text=True)
+    green_fill   = PatternFill("solid", fgColor="145A32")
+    light_fill   = PatternFill("solid", fgColor="EAF6EE")
+    border_side  = Side(style="thin", color="27AE60")
+    cell_border  = Border(left=border_side, right=border_side,
+                          top=border_side, bottom=border_side)
+
+    # Row 1 – Main title
+    ws.merge_cells("A1:C1")
+    ws["A1"] = title
+    ws["A1"].font = header_font
+    ws["A1"].fill = green_fill
+    ws["A1"].alignment = center
+    ws.row_dimensions[1].height = 32
+
+    # Rows 2-N – metadata key/value pairs
+    row = 2
+    for k, v in metadata.items():
+        ws.cell(row=row, column=1, value=k).font = meta_font
+        ws.cell(row=row, column=1).fill = light_fill
+        ws.cell(row=row, column=1).alignment = right
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+        ws.cell(row=row, column=2, value=str(v)).font = body_font
+        ws.cell(row=row, column=2).alignment = right
+        row += 1
+
+    ws.append([])
+    row += 1
+
+    # Content rows
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            ws.append([])
+            row += 1
+            continue
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        cell = ws.cell(row=row, column=1, value=line)
+        cell.font = body_font
+        cell.alignment = right
+        cell.border = cell_border
+        ws.row_dimensions[row].height = 18
+        row += 1
+
+    ws.column_dimensions["A"].width = 24
+    ws.column_dimensions["B"].width = 40
+    ws.column_dimensions["C"].width = 24
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read()
+
 
 # ═══════════════════════════════════════════════════════════
 # Web search, scientific plots, template learning
@@ -1730,8 +1867,8 @@ with st.sidebar:
 
     st.markdown("### 🎤 إدخال صوتي")
     if MIC_AVAILABLE:
-        audio_result = mic_recorder(start_prompt="🎙️ اضغط للتسجيل", stop_prompt="⏹️ إيقاف", key="mic_recorder")
-        audio_bytes = audio_result.get("bytes") if isinstance(audio_result, dict) else audio_result
+        _mic_result = mic_recorder(start_prompt="🎙️ اضغط للتسجيل", stop_prompt="⏹️ إيقاف", key="mic_recorder")
+        audio_bytes = _mic_result.get("bytes") if isinstance(_mic_result, dict) else _mic_result
         if audio_bytes:
             with st.spinner("جاري تحويل الصوت إلى نص..."):
                 transcribed = audio_to_text(audio_bytes)
@@ -1990,28 +2127,41 @@ with tab_plan:
                     unique_id = _unique_suffix()
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.download_button("📥 تحميل نص",
+                        st.download_button("📥 نص",
                                            plan_text.encode("utf-8-sig"),
                                            f"مذكرة_{plan_lesson}.txt",
                                            key=f"plan_txt_{unique_id}")
                     with col2:
-                        pdf_p = generate_lesson_plan_pdf(plan_data)
-                        st.download_button("📄 تحميل PDF (النموذج الرسمي)", pdf_p,
-                                           f"مذكرة_{plan_lesson}.pdf", "application/pdf",
-                                           key=f"plan_pdf_{unique_id}")
+                        try:
+                            pdf_p = generate_lesson_plan_pdf(plan_data)
+                            st.download_button("📄 PDF", pdf_p,
+                                               f"مذكرة_{plan_lesson}.pdf", "application/pdf",
+                                               key=f"plan_pdf_{unique_id}")
+                        except Exception as _pe:
+                            st.caption(f"⚠️ PDF: {_pe}")
                     with col3:
                         if _DOCX_AVAILABLE:
-                            docx_p = generate_lesson_plan_docx(plan_data)
-                            st.download_button("📝 تحميل Word (.docx)", docx_p,
-                                               f"مذكرة_{plan_lesson}.docx",
-                                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                               key=f"plan_docx_{unique_id}")
+                            try:
+                                docx_p = generate_lesson_plan_docx(plan_data)
+                                st.download_button("📝 Word", docx_p,
+                                                   f"مذكرة_{plan_lesson}.docx",
+                                                   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                                   key=f"plan_docx_{unique_id}")
+                            except Exception as _we:
+                                st.caption(f"⚠️ Word: {_we}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
                     with col4:
-                        if st.button("💾 حفظ في RAG", key=f"save_rag_plan_{unique_id}"):
-                            save_to_rag(plan_text, "lesson_plan", {"subject": subject, "grade": grade, "lesson": plan_lesson})
-                            st.success("✅ تم حفظ المذكرة في قاعدة المعرفة RAG")
+                        xlsx_p = generate_text_excel(plan_text, f"مذكرة: {plan_lesson}",
+                                                     {"المادة": subject, "المستوى": grade,
+                                                      "الميدان": plan_domain, "الدرس": plan_lesson})
+                        st.download_button("📊 Excel", xlsx_p,
+                                           f"مذكرة_{plan_lesson}.xlsx",
+                                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                           key=f"plan_xlsx_{unique_id}")
+                    if st.button("💾 حفظ في RAG", key=f"save_rag_plan_{unique_id}"):
+                        save_to_rag(plan_text, "lesson_plan", {"subject": subject, "grade": grade, "lesson": plan_lesson})
+                        st.success("✅ تم حفظ المذكرة في قاعدة المعرفة RAG")
                 except Exception as err:
                     st.error(f"⚠️ تعذر إكمال توليد المذكرة: {err}")
 
@@ -2141,28 +2291,41 @@ with tab_exam:
                     unique_id = _unique_suffix()
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.download_button("📥 تحميل نص",
+                        st.download_button("📥 نص",
                                            exam_content.encode("utf-8-sig"),
                                            f"اختبار_{subject}_{exam_semester}.txt",
                                            key=f"exam_txt_{unique_id}")
                     with col2:
-                        pdf_e = generate_exam_pdf(exam_pdf_data)
-                        st.download_button("📄 تحميل PDF (النموذج الرسمي)", pdf_e,
-                                           f"اختبار_{subject}_{exam_semester}.pdf",
-                                           "application/pdf", key=f"exam_pdf_{unique_id}")
+                        try:
+                            pdf_e = generate_exam_pdf(exam_pdf_data)
+                            st.download_button("📄 PDF", pdf_e,
+                                               f"اختبار_{subject}_{exam_semester}.pdf",
+                                               "application/pdf", key=f"exam_pdf_{unique_id}")
+                        except Exception as _pe:
+                            st.caption(f"⚠️ PDF: {_pe}")
                     with col3:
                         if _DOCX_AVAILABLE:
-                            docx_e = generate_exam_docx(exam_pdf_data)
-                            st.download_button("📝 تحميل Word (.docx)", docx_e,
-                                               f"اختبار_{subject}_{exam_semester}.docx",
-                                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                               key=f"exam_docx_{unique_id}")
+                            try:
+                                docx_e = generate_exam_docx(exam_pdf_data)
+                                st.download_button("📝 Word", docx_e,
+                                                   f"اختبار_{subject}_{exam_semester}.docx",
+                                                   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                                   key=f"exam_docx_{unique_id}")
+                            except Exception as _we:
+                                st.caption(f"⚠️ Word: {_we}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
                     with col4:
-                        if st.button("💾 حفظ في RAG", key=f"save_rag_exam_{unique_id}"):
-                            save_to_rag(exam_content, "exam", {"subject": subject, "grade": grade, "semester": exam_semester})
-                            st.success("✅ تم حفظ الاختبار في قاعدة المعرفة RAG")
+                        xlsx_e = generate_text_excel(exam_content, f"اختبار: {subject}",
+                                                     {"المادة": subject, "المستوى": grade,
+                                                      "الفصل": exam_semester, "المدة": exam_duration})
+                        st.download_button("📊 Excel", xlsx_e,
+                                           f"اختبار_{subject}_{exam_semester}.xlsx",
+                                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                           key=f"exam_xlsx_{unique_id}")
+                    if st.button("💾 حفظ في RAG", key=f"save_rag_exam_{unique_id}"):
+                        save_to_rag(exam_content, "exam", {"subject": subject, "grade": grade, "semester": exam_semester})
+                        st.success("✅ تم حفظ الاختبار في قاعدة المعرفة RAG")
                 except Exception as err:
                     st.error(f"❌ {err}")
 
@@ -2545,32 +2708,45 @@ with tab_ex:
                     unique_id = _unique_suffix()
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.download_button("📥 تحميل نص", res_text.encode("utf-8-sig"),
+                        st.download_button("📥 نص", res_text.encode("utf-8-sig"),
                                            f"{lesson}.txt", key=f"ex_txt_{unique_id}")
                     with col2:
-                        rtl, _ = get_pdf_mode_for_subject(subject)
-                        pdf_ex = generate_simple_pdf(res_text, lesson, f"{subject} | {grade}", rtl=rtl)
-                        st.download_button("📄 تحميل PDF", pdf_ex, f"{lesson}.pdf",
-                                           "application/pdf", key=f"ex_pdf_{unique_id}")
+                        try:
+                            rtl, _ = get_pdf_mode_for_subject(subject)
+                            pdf_ex = generate_simple_pdf(res_text, lesson, f"{subject} | {grade}", rtl=rtl)
+                            st.download_button("📄 PDF", pdf_ex, f"{lesson}.pdf",
+                                               "application/pdf", key=f"ex_pdf_{unique_id}")
+                        except Exception as _pe:
+                            st.caption(f"⚠️ PDF: {_pe}")
                     with col3:
                         if _DOCX_AVAILABLE:
-                            ex_docx_data = {
-                                "school": school_name, "teacher": teacher_name,
-                                "subject": subject, "grade": f"{grade}{branch_txt}",
-                                "lesson": lesson, "domain": "تمارين",
-                                "duration": "غير محدد", "content": res_text
-                            }
-                            docx_ex = generate_lesson_plan_docx(ex_docx_data)
-                            st.download_button("📝 تحميل Word (.docx)", docx_ex,
-                                               f"{lesson}.docx",
-                                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                               key=f"ex_docx_{unique_id}")
+                            try:
+                                ex_docx_data = {
+                                    "school": school_name, "teacher": teacher_name,
+                                    "subject": subject, "grade": f"{grade}{branch_txt}",
+                                    "lesson": lesson, "domain": "تمارين",
+                                    "duration": "غير محدد", "content": res_text
+                                }
+                                docx_ex = generate_lesson_plan_docx(ex_docx_data)
+                                st.download_button("📝 Word", docx_ex,
+                                                   f"{lesson}.docx",
+                                                   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                                   key=f"ex_docx_{unique_id}")
+                            except Exception as _we:
+                                st.caption(f"⚠️ Word: {_we}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
                     with col4:
-                        if st.button("💾 حفظ في RAG", key=f"save_rag_ex_{unique_id}"):
-                            save_to_rag(res_text, "exercise", {"subject": subject, "grade": grade, "lesson": lesson})
-                            st.success("✅ تم حفظ التمرين في قاعدة المعرفة RAG")
+                        xlsx_ex = generate_text_excel(res_text, f"تمرين: {lesson}",
+                                                      {"المادة": subject, "المستوى": grade,
+                                                       "النوع": ex_type, "الصعوبة": difficulty})
+                        st.download_button("📊 Excel", xlsx_ex,
+                                           f"{lesson}.xlsx",
+                                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                           key=f"ex_xlsx_{unique_id}")
+                    if st.button("💾 حفظ في RAG", key=f"save_rag_ex_{unique_id}"):
+                        save_to_rag(res_text, "exercise", {"subject": subject, "grade": grade, "lesson": lesson})
+                        st.success("✅ تم حفظ التمرين في قاعدة المعرفة RAG")
                 except Exception as err:
                     st.error(f"❌ {err}")
 
@@ -2669,37 +2845,52 @@ with tab_correct:
                     unique_id = _unique_suffix()
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.download_button("📥 تحميل نص التصحيح",
+                        st.download_button("📥 نص",
                                            correction.encode("utf-8-sig"),
                                            f"تصحيح_{student_name or 'طالب'}.txt",
                                            key=f"corr_txt_{unique_id}")
                     with col2:
-                        rtl, _ = get_pdf_mode_for_subject(exam_subj)
-                        pdf_c = generate_simple_pdf(
-                            correction, f"تصحيح: {student_name or 'طالب'}", exam_subj, rtl=rtl)
-                        st.download_button("📄 تحميل التصحيح PDF", pdf_c,
-                                           f"تصحيح_{student_name or 'طالب'}.pdf",
-                                           "application/pdf", key=f"corr_pdf_{unique_id}")
+                        try:
+                            rtl, _ = get_pdf_mode_for_subject(exam_subj)
+                            pdf_c = generate_simple_pdf(
+                                correction, f"تصحيح: {student_name or 'طالب'}", exam_subj, rtl=rtl)
+                            st.download_button("📄 PDF", pdf_c,
+                                               f"تصحيح_{student_name or 'طالب'}.pdf",
+                                               "application/pdf", key=f"corr_pdf_{unique_id}")
+                        except Exception as _pe:
+                            st.caption(f"⚠️ PDF: {_pe}")
                     with col3:
                         if _DOCX_AVAILABLE:
-                            corr_docx_data = {
-                                "school": school_name, "teacher": teacher_name,
-                                "subject": exam_subj, "grade": grade,
-                                "lesson": f"تصحيح {student_name or 'طالب'}",
-                                "domain": "تصحيح", "duration": "غير محدد",
-                                "content": correction
-                            }
-                            docx_corr = generate_lesson_plan_docx(corr_docx_data)
-                            st.download_button("📝 تحميل Word (.docx)", docx_corr,
-                                               f"تصحيح_{student_name or 'طالب'}.docx",
-                                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                               key=f"corr_docx_{unique_id}")
+                            try:
+                                corr_docx_data = {
+                                    "school": school_name, "teacher": teacher_name,
+                                    "subject": exam_subj, "grade": grade,
+                                    "lesson": f"تصحيح {student_name or 'طالب'}",
+                                    "domain": "تصحيح", "duration": "غير محدد",
+                                    "content": correction
+                                }
+                                docx_corr = generate_lesson_plan_docx(corr_docx_data)
+                                st.download_button("📝 Word", docx_corr,
+                                                   f"تصحيح_{student_name or 'طالب'}.docx",
+                                                   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                                   key=f"corr_docx_{unique_id}")
+                            except Exception as _we:
+                                st.caption(f"⚠️ Word: {_we}")
                         else:
                             st.caption("⚠️ python-docx غير مثبت")
                     with col4:
-                        if st.button("💾 حفظ في RAG", key=f"save_rag_corr_{unique_id}"):
-                            save_to_rag(correction, "correction", {"student": student_name or "مجهول", "subject": exam_subj})
-                            st.success("✅ تم حفظ التصحيح في قاعدة المعرفة RAG")
+                        xlsx_c = generate_text_excel(correction,
+                                                     f"تصحيح: {student_name or 'طالب'}",
+                                                     {"الطالب": student_name or "مجهول",
+                                                      "المادة": exam_subj,
+                                                      "العلامة": f"{gv}/{total_marks}"})
+                        st.download_button("📊 Excel", xlsx_c,
+                                           f"تصحيح_{student_name or 'طالب'}.xlsx",
+                                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                           key=f"corr_xlsx_{unique_id}")
+                    if st.button("💾 حفظ في RAG", key=f"save_rag_corr_{unique_id}"):
+                        save_to_rag(correction, "correction", {"student": student_name or "مجهول", "subject": exam_subj})
+                        st.success("✅ تم حفظ التصحيح في قاعدة المعرفة RAG")
                 except Exception as err:
                     st.error(f"❌ {err}")
 
@@ -2732,13 +2923,23 @@ with tab_template:
             
             if st.button("تحليل هيكل القالب بالذكاء الاصطناعي وحفظه", key="btn_analyze_template"):
                 with st.spinner("AI يقوم بتحليل الهيكل..."):
-                    structure = analyze_template_structure(raw_text, template_type)
-                    if "error" not in structure:
-                        save_template(template_name, template_type, raw_text, structure)
-                        st.success(f"✅ تم حفظ القالب '{template_name}' بنجاح!")
-                        st.json(structure)
-                    else:
-                        st.error(f"فشل التحليل: {structure.get('error')}")
+                    try:
+                        structure = analyze_template_structure(raw_text, template_type)
+                        if "error" not in structure:
+                            save_template(template_name, template_type, raw_text, structure)
+                            st.success(f"✅ تم حفظ القالب '{template_name}' بنجاح!")
+                            st.json(structure)
+                        else:
+                            st.error(f"فشل التحليل: {structure.get('error')}")
+                    except Exception as _tmpl_err:
+                        st.error(f"❌ خطأ في تحليل القالب: {_tmpl_err}")
+                        try:
+                            fallback_struct = {"type": "unknown", "sections": [], "metadata": {},
+                                               "key_phrases": [], "suggested_prompt_template": raw_text[:500]}
+                            save_template(template_name, template_type, raw_text, fallback_struct)
+                            st.warning("⚠️ تم الحفظ بهيكل افتراضي بسبب فشل التحليل.")
+                        except Exception as _save_err:
+                            st.error(f"❌ فشل الحفظ أيضاً: {_save_err}")
         else:
             st.warning("⚠️ لم يتم استخراج نص من الملف. تأكد من أن الملف يحتوي على نص واضح.")
     
