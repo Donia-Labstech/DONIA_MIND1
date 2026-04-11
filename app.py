@@ -180,49 +180,24 @@ class ArabicFPDF(FPDF):
         self._active_font = "Helvetica"
         self.has_unicode = False
 
-        # Use /tmp as writable font cache (always writable on Streamlit Cloud)
-        tmp_dir  = "/tmp/donia_fonts"
+        # /tmp is always writable on Streamlit Cloud (unlike /mount/src/)
+        tmp_dir = "/tmp/donia_fonts"
         try:
             os.makedirs(tmp_dir, exist_ok=True)
         except Exception:
             tmp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
             os.makedirs(tmp_dir, exist_ok=True)
 
-        reg_path  = os.path.join(tmp_dir, "Amiri-Regular.ttf")
-        bold_path = os.path.join(tmp_dir, "Amiri-Bold.ttf")
-        deja_tmp  = os.path.join(tmp_dir, "DejaVuSans.ttf")
+        amiri_reg  = os.path.join(tmp_dir, "Amiri-Regular.ttf")
+        amiri_bold = os.path.join(tmp_dir, "Amiri-Bold.ttf")
 
-        # ── Priority 1: system DejaVu (guaranteed on Streamlit Cloud / Ubuntu 22) ──
-        _sys_deja_reg  = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        _sys_deja_bold = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-        if os.path.exists(_sys_deja_reg):
+        # ── PRIORITY 1: Amiri from /tmp cache ──────────────────────────
+        # Amiri has the best Arabic rendering and is pure Unicode
+        if os.path.exists(amiri_reg) and os.path.getsize(amiri_reg) > 100_000:
             try:
-                self.add_font("DejaVu", "",  _sys_deja_reg)
-                if os.path.exists(_sys_deja_bold):
-                    self.add_font("DejaVu", "B", _sys_deja_bold)
-                self.set_font("DejaVu", size=12)
-                self._active_font = "DejaVu"
-                self.has_unicode = True
-                # Also try to load Amiri on top for better Arabic rendering
-                try:
-                    if os.path.exists(reg_path) and os.path.getsize(reg_path) > 100_000:
-                        self.add_font("Amiri", "", reg_path)
-                        b_src = bold_path if os.path.exists(bold_path) and os.path.getsize(bold_path) > 100_000 else reg_path
-                        self.add_font("Amiri", "B", b_src)
-                        self.set_font("Amiri", size=12)
-                        self.use_amiri = True
-                        self._active_font = "Amiri"
-                except Exception:
-                    pass  # DejaVu still active
-                return
-            except Exception:
-                pass
-
-        # ── Priority 2: cached Amiri in /tmp ──
-        if os.path.exists(reg_path) and os.path.getsize(reg_path) > 100_000:
-            try:
-                self.add_font("Amiri", "", reg_path)
-                b_src = bold_path if os.path.exists(bold_path) and os.path.getsize(bold_path) > 100_000 else reg_path
+                self.add_font("Amiri", "",  amiri_reg)
+                b_src = amiri_bold if (os.path.exists(amiri_bold)
+                        and os.path.getsize(amiri_bold) > 100_000) else amiri_reg
                 self.add_font("Amiri", "B", b_src)
                 self.set_font("Amiri", size=12)
                 self.use_amiri = True
@@ -232,21 +207,22 @@ class ArabicFPDF(FPDF):
             except Exception:
                 pass
 
-        # ── Priority 3: download Amiri to /tmp ──
+        # ── PRIORITY 2: Download Amiri → /tmp ─────────────────────────
         for url_r, url_b in self._AMIRI_URLS:
             try:
                 r = requests.get(url_r, timeout=15)
                 if r.status_code == 200 and len(r.content) > 100_000:
-                    open(reg_path, "wb").write(r.content)
+                    open(amiri_reg, "wb").write(r.content)
                     try:
                         rb = requests.get(url_b, timeout=15)
                         if rb.status_code == 200:
-                            open(bold_path, "wb").write(rb.content)
+                            open(amiri_bold, "wb").write(rb.content)
                     except Exception:
                         pass
                     try:
-                        self.add_font("Amiri", "", reg_path)
-                        b_src = bold_path if os.path.exists(bold_path) and os.path.getsize(bold_path) > 100_000 else reg_path
+                        self.add_font("Amiri", "",  amiri_reg)
+                        b_src = amiri_bold if (os.path.exists(amiri_bold)
+                                and os.path.getsize(amiri_bold) > 100_000) else amiri_reg
                         self.add_font("Amiri", "B", b_src)
                         self.set_font("Amiri", size=12)
                         self.use_amiri = True
@@ -259,43 +235,54 @@ class ArabicFPDF(FPDF):
             except Exception:
                 continue
 
-        # ── Priority 4: other system font paths ──
-        for sys_path in self._SYSTEM_DEJAVU:
-            if os.path.exists(sys_path) and "Bold" not in sys_path:
-                try:
-                    self.add_font("DejaVu", "", sys_path)
-                    self.set_font("DejaVu", size=12)
-                    self._active_font = "DejaVu"
-                    self.has_unicode = True
-                    return
-                except Exception:
-                    continue
-
-        # ── Priority 5: download DejaVu to /tmp ──
-        if not (os.path.exists(deja_tmp) and os.path.getsize(deja_tmp) > 200_000):
-            for url in self._DEJAVU_URLS:
-                try:
-                    r = requests.get(url, timeout=15)
-                    if r.status_code == 200 and len(r.content) > 200_000:
-                        open(deja_tmp, "wb").write(r.content)
-                        break
-                except Exception:
-                    continue
-        if os.path.exists(deja_tmp) and os.path.getsize(deja_tmp) > 200_000:
+        # ── PRIORITY 3: GNU FreeSans (system, HAS full Arabic support) ─
+        # FreeSans is 1.8 MB and covers Arabic U+0600–U+06FF
+        # NOTE: DejaVuSans (759 KB) does NOT have Arabic → never use it for Arabic PDF
+        _free_sans = "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
+        _free_bold = "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
+        if os.path.exists(_free_sans):
             try:
-                self.add_font("DejaVu", "", deja_tmp)
-                self.set_font("DejaVu", size=12)
-                self._active_font = "DejaVu"
+                self.add_font("FreeSans", "",  _free_sans)
+                if os.path.exists(_free_bold):
+                    self.add_font("FreeSans", "B", _free_bold)
+                self.set_font("FreeSans", size=12)
+                self._active_font = "FreeSans"
                 self.has_unicode = True
                 return
             except Exception:
                 pass
 
-        # ── Last resort: Helvetica (no Arabic, shows ???) ──
+        # ── PRIORITY 4: GNU FreeSerif (also has full Arabic support) ───
+        _free_serif = "/usr/share/fonts/truetype/freefont/FreeSerif.ttf"
+        _free_serif_b = "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf"
+        if os.path.exists(_free_serif):
+            try:
+                self.add_font("FreeSerif", "",  _free_serif)
+                if os.path.exists(_free_serif_b):
+                    self.add_font("FreeSerif", "B", _free_serif_b)
+                self.set_font("FreeSerif", size=12)
+                self._active_font = "FreeSerif"
+                self.has_unicode = True
+                return
+            except Exception:
+                pass
+
+        # ── PRIORITY 5: Other system Unicode paths ──────────────────────
+        for sys_path in self._SYSTEM_DEJAVU:
+            if os.path.exists(sys_path) and "Bold" not in sys_path and "Oblique" not in sys_path:
+                try:
+                    self.add_font("SysFallback", "", sys_path)
+                    self.set_font("SysFallback", size=12)
+                    self._active_font = "SysFallback"
+                    self.has_unicode = True
+                    return
+                except Exception:
+                    continue
+
+        # ── LAST RESORT: Helvetica ASCII-only ──────────────────────────
         self.set_font("Helvetica", size=12)
         self._active_font = "Helvetica"
         self.has_unicode = False
-
     def _safe_text(self, text: str, rtl: bool = True) -> str:
         """Return text safe for current font. If no Unicode font, strip non-ASCII."""
         if self.has_unicode:
@@ -304,37 +291,65 @@ class ArabicFPDF(FPDF):
         return re.sub(r'[^\x20-\x7E]', '?', text)
 
     def _font(self, bold: bool = False) -> str:
-        if self._active_font == "Amiri":
-            return "Amiri"
-        if self._active_font == "DejaVu":
-            return "DejaVu"
+        if self._active_font in ("Amiri", "FreeSans", "FreeSerif", "SysFallback", "DejaVu"):
+            return self._active_font
         return "Helvetica"
 
     def set_sized_font(self, size: int, bold: bool = False):
-        style = "B" if bold and self._active_font == "Amiri" else ""
+        # Bold supported for Amiri and FreeSans; others use regular
+        fonts_with_bold = ("Amiri", "FreeSans", "FreeSerif")
+        style = "B" if bold and self._active_font in fonts_with_bold else ""
         self.set_font(self._font(), style, size)
 
     def multi_cell_text(self, text, w, align='R', rtl=True):
         safe = self._safe_text(text, rtl)
-        self.multi_cell(w, 6, safe, border=0, align=align)
+        try:
+            self.multi_cell(w, 6, safe, border=0, align=align)
+        except Exception:
+            # Ultimate fallback: strip to ASCII
+            ascii_safe = re.sub(r'[^ -~]', '', safe).strip() or "[Arabic text]"
+            try:
+                self.multi_cell(w, 6, ascii_safe, border=0, align=align)
+            except Exception:
+                pass
+
+    def safe_cell(self, w, h, txt, border=0, ln=False, align='', fill=False):
+        """pdf.cell() wrapper that never crashes on Unicode errors."""
+        try:
+            self.cell(w, h, txt, border=border, ln=ln, align=align, fill=fill)
+        except Exception:
+            ascii_txt = re.sub(r'[^ -~]', '', str(txt)).strip()
+            try:
+                self.cell(w, h, ascii_txt, border=border, ln=ln, align=align, fill=fill)
+            except Exception:
+                pass
+
 
 def ensure_font_files():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    font_dir = os.path.join(base_dir, "fonts")
-    os.makedirs(font_dir, exist_ok=True)
+    """Pre-warm font cache in /tmp — always writable on Streamlit Cloud."""
+    font_dir = "/tmp/donia_fonts"
+    try:
+        os.makedirs(font_dir, exist_ok=True)
+    except Exception:
+        return
     pairs = (
-        ("Amiri-Regular.ttf", "https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Regular.ttf"),
-        ("Amiri-Bold.ttf", "https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Bold.ttf"),
+        ("Amiri-Regular.ttf", "https://cdn.jsdelivr.net/gh/google/fonts/ofl/amiri/Amiri-Regular.ttf"),
+        ("Amiri-Bold.ttf",    "https://cdn.jsdelivr.net/gh/google/fonts/ofl/amiri/Amiri-Bold.ttf"),
     )
     for fname, url in pairs:
         path = os.path.join(font_dir, fname)
-        if not os.path.exists(path) or os.path.getsize(path) < 100000:
-            try:
-                r = requests.get(url, timeout=10)
-                with open(path, "wb") as f:
-                    f.write(r.content)
-            except Exception:
-                pass
+        if not os.path.exists(path) or os.path.getsize(path) < 100_000:
+            for u in [url,
+                      url.replace("cdn.jsdelivr.net/gh/google/fonts/ofl/amiri",
+                                  "github.com/googlefonts/amiri/raw/main/fonts/ttf")]:
+                try:
+                    r = requests.get(u, timeout=12)
+                    if r.status_code == 200 and len(r.content) > 100_000:
+                        with open(path, "wb") as f:
+                            f.write(r.content)
+                        break
+                except Exception:
+                    continue
 
 # ========== PDF GENERATORS ==========
 def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool = True) -> bytes:
@@ -343,13 +358,13 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
     pdf.add_page()
     pdf.set_sized_font(14)
     if rtl:
-        pdf.cell(0, 8, pdf._safe_text("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
-        pdf.cell(0, 8, pdf._safe_text("وزارة التربية الوطنية"), ln=True, align='C')
-        pdf.cell(0, 8, pdf._safe_text(f"DONIA MIND — {title}"), ln=True, align='C')
+        pdf.safe_cell(0, 8, pdf._safe_text("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
+        pdf.safe_cell(0, 8, pdf._safe_text("وزارة التربية الوطنية"), ln=True, align='C')
+        pdf.safe_cell(0, 8, pdf._safe_text(f"DONIA MIND — {title}"), ln=True, align='C')
     else:
-        pdf.cell(0, 8, "Algerian Democratic Republic", ln=True, align='C')
-        pdf.cell(0, 8, "Ministry of Education", ln=True, align='C')
-        pdf.cell(0, 8, f"DONIA MIND — {title}", ln=True, align='C')
+        pdf.safe_cell(0, 8, "Algerian Democratic Republic", ln=True, align='C')
+        pdf.safe_cell(0, 8, "Ministry of Education", ln=True, align='C')
+        pdf.safe_cell(0, 8, f"DONIA MIND — {title}", ln=True, align='C')
     pdf.ln(5)
     pdf.set_sized_font(11)
     for line in content.splitlines():
@@ -366,7 +381,7 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
         pdf.ln(2)
     pdf.set_y(-15)
     pdf.set_sized_font(8)
-    pdf.cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
+    pdf.safe_cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
     return bytes(pdf.output())
 
 def generate_exam_pdf(exam_data: dict) -> bytes:
@@ -376,21 +391,21 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     subj = exam_data.get("subject", "")
     rtl, _ = get_pdf_mode_for_subject(subj)
     pdf.set_sized_font(10)
-    pdf.cell(95, 8, pdf._safe_text(exam_data.get("school", ""), rtl), border=1, align='C')
-    pdf.cell(95, 8,
+    pdf.safe_cell(95, 8, pdf._safe_text(exam_data.get("school", ""), rtl), border=1, align='C')
+    pdf.safe_cell(95, 8,
              pdf._safe_text("الجمهورية الجزائرية الديمقراطية الشعبية", rtl) if rtl else "Algerian Republic",
              border=1, ln=True, align='C')
-    pdf.cell(95, 8,
+    pdf.safe_cell(95, 8,
              pdf._safe_text(f"المستوى: {exam_data.get('grade', '')}", rtl) if rtl else f"Level: {exam_data.get('grade', '')}",
              border=1)
-    pdf.cell(95, 8,
+    pdf.safe_cell(95, 8,
              pdf._safe_text(f"المدة: {exam_data.get('duration', '')}", rtl) if rtl else f"Duration: {exam_data.get('duration', '')}",
              border=1, ln=True)
     pdf.ln(8)
     pdf.set_sized_font(14, bold=True)
     title = (f"اختبار {exam_data.get('semester', '')} في مادة {subj}"
              if rtl else f"Exam — {exam_data.get('semester', '')} — {subj}")
-    pdf.cell(0, 10, pdf._safe_text(title, rtl) if rtl else title, ln=True, align='C')
+    pdf.safe_cell(0, 10, pdf._safe_text(title, rtl) if rtl else title, ln=True, align='C')
     pdf.ln(5)
     pdf.set_sized_font(11)
     content_text = exam_data.get("content", "")
@@ -403,52 +418,52 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
         pdf.ln(1)
     pdf.set_y(-15)
     pdf.set_sized_font(8)
-    pdf.cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR, rtl), align='C')
+    pdf.safe_cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR, rtl), align='C')
     return bytes(pdf.output())
 def generate_report_pdf(report_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
     pdf.set_sized_font(12)
-    pdf.cell(0, 10, pdf._safe_text("تحليل نتائج الأقسام"), ln=True, align='C')
+    pdf.safe_cell(0, 10, pdf._safe_text("تحليل نتائج الأقسام"), ln=True, align='C')
     pdf.ln(5)
     for cls in report_data.get('classes', []):
         pdf.set_sized_font(12, bold=True)
-        pdf.cell(0, 8, pdf._safe_text(f"القسم: {cls['name']}"), ln=True, align='R')
+        pdf.safe_cell(0, 8, pdf._safe_text(f"القسم: {cls['name']}"), ln=True, align='R')
         pdf.set_sized_font(11)
         stats = f"عدد التلاميذ: {cls.get('total',0)}  |  المعدل: {cls.get('avg',0):.2f}  |  النجاح: {cls.get('pass_rate',0):.1f}%"
         pdf.multi_cell_text(stats, 190, align='R', rtl=True)
         pdf.ln(4)
         if cls.get('top5'):
             pdf.set_sized_font(11, bold=True)
-            pdf.cell(0, 6, pdf._safe_text("أفضل 5 تلاميذ"), ln=True, align='R')
+            pdf.safe_cell(0, 6, pdf._safe_text("أفضل 5 تلاميذ"), ln=True, align='R')
             pdf.set_sized_font(10)
             for i, s in enumerate(cls['top5'][:5], 1):
-                pdf.cell(0, 5, pdf._safe_text(f"{i}. {s['name']} — {s['avg']:.2f}"), ln=True, align='R')
+                pdf.safe_cell(0, 5, pdf._safe_text(f"{i}. {s['name']} — {s['avg']:.2f}"), ln=True, align='R')
         pdf.ln(6)
     if report_data.get('ai_analysis'):
         pdf.set_sized_font(11, bold=True)
-        pdf.cell(0, 8, pdf._safe_text("التحليل البيداغوجي"), ln=True, align='R')
+        pdf.safe_cell(0, 8, pdf._safe_text("التحليل البيداغوجي"), ln=True, align='R')
         pdf.set_sized_font(10)
         for line in report_data['ai_analysis'].splitlines():
             if line.strip():
                 pdf.multi_cell_text(line, 190, align='R', rtl=True)
     pdf.set_y(-15)
     pdf.set_sized_font(8)
-    pdf.cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR), align='C')
+    pdf.safe_cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR), align='C')
     return bytes(pdf.output())
 def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
     pdf.set_sized_font(11)
-    pdf.cell(0, 8, pdf._safe_text("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
-    pdf.cell(0, 8, pdf._safe_text("وزارة التربية الوطنية"), ln=True, align='C')
+    pdf.safe_cell(0, 8, pdf._safe_text("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
+    pdf.safe_cell(0, 8, pdf._safe_text("وزارة التربية الوطنية"), ln=True, align='C')
     pdf.ln(4)
     pdf.set_sized_font(13, bold=True)
     header_text = (f"مذكرة رقم: ____ | المؤسسة: {plan_data.get('school','')} | "
                    f"الأستاذ(ة): {plan_data.get('teacher','')}")
-    pdf.cell(0, 8, pdf._safe_text(header_text), ln=True, align='R')
+    pdf.safe_cell(0, 8, pdf._safe_text(header_text), ln=True, align='R')
     pdf.ln(5)
     pdf.set_sized_font(10)
     info = [
@@ -460,13 +475,13 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
         ("نوع الحصة",       plan_data.get('session_type', '')),
     ]
     for i in range(0, len(info), 2):
-        pdf.cell(45, 7, pdf._safe_text(info[i][0]),   border=1)
-        pdf.cell(50, 7, pdf._safe_text(info[i][1]),   border=1)
-        pdf.cell(45, 7, pdf._safe_text(info[i+1][0]), border=1)
-        pdf.cell(50, 7, pdf._safe_text(info[i+1][1]), border=1, ln=True)
+        pdf.safe_cell(45, 7, pdf._safe_text(info[i][0]),   border=1)
+        pdf.safe_cell(50, 7, pdf._safe_text(info[i][1]),   border=1)
+        pdf.safe_cell(45, 7, pdf._safe_text(info[i+1][0]), border=1)
+        pdf.safe_cell(50, 7, pdf._safe_text(info[i+1][1]), border=1, ln=True)
     pdf.ln(5)
     for s in ["المرحلة", "المدة", "سير الدرس", "التقويم"]:
-        pdf.cell(47.5, 7, pdf._safe_text(s), border=1)
+        pdf.safe_cell(47.5, 7, pdf._safe_text(s), border=1)
     pdf.ln()
     rows = [
         ("تهيئة",            plan_data.get('duration_t', '5 د'),  plan_data.get('intro', ''),    plan_data.get('eval', '')),
@@ -475,14 +490,14 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
         ("الواجب المنزلي",  "",                                    plan_data.get('homework', ''), ""),
     ]
     for row in rows:
-        pdf.cell(47.5, 40, pdf._safe_text(row[0]), border=1)
-        pdf.cell(47.5, 40, pdf._safe_text(row[1]), border=1)
+        pdf.safe_cell(47.5, 40, pdf._safe_text(row[0]), border=1)
+        pdf.safe_cell(47.5, 40, pdf._safe_text(row[1]), border=1)
         pdf.multi_cell(47.5, 5, pdf._safe_text(row[2]), border=1)
-        pdf.cell(47.5, 40, pdf._safe_text(row[3]), border=1)
+        pdf.safe_cell(47.5, 40, pdf._safe_text(row[3]), border=1)
         pdf.ln()
     pdf.set_y(-15)
     pdf.set_sized_font(8)
-    pdf.cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR), align='C')
+    pdf.safe_cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR), align='C')
     return bytes(pdf.output())
 
 
