@@ -180,28 +180,45 @@ class ArabicFPDF(FPDF):
         self._active_font = "Helvetica"
         self.has_unicode = False
 
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        font_dir = os.path.join(base_dir, "fonts")
-        os.makedirs(font_dir, exist_ok=True)
-        reg_path  = os.path.join(font_dir, "Amiri-Regular.ttf")
-        bold_path = os.path.join(font_dir, "Amiri-Bold.ttf")
-        deja_path = os.path.join(font_dir, "DejaVuSans.ttf")
+        # Use /tmp as writable font cache (always writable on Streamlit Cloud)
+        tmp_dir  = "/tmp/donia_fonts"
+        try:
+            os.makedirs(tmp_dir, exist_ok=True)
+        except Exception:
+            tmp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+            os.makedirs(tmp_dir, exist_ok=True)
 
-        # ── Step 1: try to download Amiri ──
-        if not os.path.exists(reg_path) or os.path.getsize(reg_path) < 100_000:
-            for url_r, url_b in self._AMIRI_URLS:
+        reg_path  = os.path.join(tmp_dir, "Amiri-Regular.ttf")
+        bold_path = os.path.join(tmp_dir, "Amiri-Bold.ttf")
+        deja_tmp  = os.path.join(tmp_dir, "DejaVuSans.ttf")
+
+        # ── Priority 1: system DejaVu (guaranteed on Streamlit Cloud / Ubuntu 22) ──
+        _sys_deja_reg  = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        _sys_deja_bold = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        if os.path.exists(_sys_deja_reg):
+            try:
+                self.add_font("DejaVu", "",  _sys_deja_reg)
+                if os.path.exists(_sys_deja_bold):
+                    self.add_font("DejaVu", "B", _sys_deja_bold)
+                self.set_font("DejaVu", size=12)
+                self._active_font = "DejaVu"
+                self.has_unicode = True
+                # Also try to load Amiri on top for better Arabic rendering
                 try:
-                    r = requests.get(url_r, timeout=12)
-                    if r.status_code == 200 and len(r.content) > 100_000:
-                        open(reg_path, "wb").write(r.content)
-                        rb = requests.get(url_b, timeout=12)
-                        if rb.status_code == 200:
-                            open(bold_path, "wb").write(rb.content)
-                        break
+                    if os.path.exists(reg_path) and os.path.getsize(reg_path) > 100_000:
+                        self.add_font("Amiri", "", reg_path)
+                        b_src = bold_path if os.path.exists(bold_path) and os.path.getsize(bold_path) > 100_000 else reg_path
+                        self.add_font("Amiri", "B", b_src)
+                        self.set_font("Amiri", size=12)
+                        self.use_amiri = True
+                        self._active_font = "Amiri"
                 except Exception:
-                    continue
+                    pass  # DejaVu still active
+                return
+            except Exception:
+                pass
 
-        # ── Step 2: try to load Amiri ──
+        # ── Priority 2: cached Amiri in /tmp ──
         if os.path.exists(reg_path) and os.path.getsize(reg_path) > 100_000:
             try:
                 self.add_font("Amiri", "", reg_path)
@@ -215,9 +232,36 @@ class ArabicFPDF(FPDF):
             except Exception:
                 pass
 
-        # ── Step 3: try system DejaVu (often present on Ubuntu/Streamlit Cloud) ──
+        # ── Priority 3: download Amiri to /tmp ──
+        for url_r, url_b in self._AMIRI_URLS:
+            try:
+                r = requests.get(url_r, timeout=15)
+                if r.status_code == 200 and len(r.content) > 100_000:
+                    open(reg_path, "wb").write(r.content)
+                    try:
+                        rb = requests.get(url_b, timeout=15)
+                        if rb.status_code == 200:
+                            open(bold_path, "wb").write(rb.content)
+                    except Exception:
+                        pass
+                    try:
+                        self.add_font("Amiri", "", reg_path)
+                        b_src = bold_path if os.path.exists(bold_path) and os.path.getsize(bold_path) > 100_000 else reg_path
+                        self.add_font("Amiri", "B", b_src)
+                        self.set_font("Amiri", size=12)
+                        self.use_amiri = True
+                        self._active_font = "Amiri"
+                        self.has_unicode = True
+                        return
+                    except Exception:
+                        pass
+                break
+            except Exception:
+                continue
+
+        # ── Priority 4: other system font paths ──
         for sys_path in self._SYSTEM_DEJAVU:
-            if os.path.exists(sys_path):
+            if os.path.exists(sys_path) and "Bold" not in sys_path:
                 try:
                     self.add_font("DejaVu", "", sys_path)
                     self.set_font("DejaVu", size=12)
@@ -227,19 +271,19 @@ class ArabicFPDF(FPDF):
                 except Exception:
                     continue
 
-        # ── Step 4: download DejaVu ──
-        if not os.path.exists(deja_path) or os.path.getsize(deja_path) < 200_000:
+        # ── Priority 5: download DejaVu to /tmp ──
+        if not (os.path.exists(deja_tmp) and os.path.getsize(deja_tmp) > 200_000):
             for url in self._DEJAVU_URLS:
                 try:
-                    r = requests.get(url, timeout=12)
+                    r = requests.get(url, timeout=15)
                     if r.status_code == 200 and len(r.content) > 200_000:
-                        open(deja_path, "wb").write(r.content)
+                        open(deja_tmp, "wb").write(r.content)
                         break
                 except Exception:
                     continue
-        if os.path.exists(deja_path) and os.path.getsize(deja_path) > 200_000:
+        if os.path.exists(deja_tmp) and os.path.getsize(deja_tmp) > 200_000:
             try:
-                self.add_font("DejaVu", "", deja_path)
+                self.add_font("DejaVu", "", deja_tmp)
                 self.set_font("DejaVu", size=12)
                 self._active_font = "DejaVu"
                 self.has_unicode = True
@@ -247,7 +291,7 @@ class ArabicFPDF(FPDF):
             except Exception:
                 pass
 
-        # ── Step 5: last resort – Helvetica (ASCII only, Arabic will be skipped) ──
+        # ── Last resort: Helvetica (no Arabic, shows ???) ──
         self.set_font("Helvetica", size=12)
         self._active_font = "Helvetica"
         self.has_unicode = False
@@ -3243,7 +3287,17 @@ with tab_template:
         if raw_text.strip():
             st.success(f"تم استخراج {len(raw_text)} حرف من القالب.")
             with st.expander("معاينة النص المستخرج"):
-                st.text(raw_text[:1000] + ("..." if len(raw_text) > 1000 else ""))
+                # Display raw text in a proper RTL container (no bidi processing for UI)
+                preview_clean = raw_text[:1000] + ("..." if len(raw_text) > 1000 else "")
+                # Escape HTML special chars then wrap in RTL div
+                import html as _html
+                preview_escaped = _html.escape(preview_clean).replace("\n", "<br>")
+                st.markdown(
+                    f'''<div style="direction:rtl;text-align:right;font-family:'Cairo',sans-serif;
+                    font-size:0.92rem;line-height:1.9;background:#f4fbf6;border-radius:10px;
+                    padding:1rem;color:#111;border:1px solid #27ae60;white-space:pre-wrap;">
+                    {preview_escaped}</div>''',
+                    unsafe_allow_html=True)
             
             if st.button("تحليل هيكل القالب بالذكاء الاصطناعي وحفظه", key="btn_analyze_template"):
                 with st.spinner("AI يقوم بتحليل الهيكل..."):
@@ -3252,7 +3306,23 @@ with tab_template:
                         if "error" not in structure:
                             save_template(template_name, template_type, raw_text, structure)
                             st.success(f"✅ تم حفظ القالب '{template_name}' بنجاح!")
-                            st.json(structure)
+                            # Show structure fields in RTL-safe way
+                            st.markdown(f"**النوع:** `{structure.get('type','')}`")
+                            if structure.get('sections'):
+                                st.markdown(f"**الأقسام:** {', '.join(str(s) for s in structure['sections'])}")
+                            if structure.get('key_phrases'):
+                                st.markdown(f"**العبارات المفتاحية:** {', '.join(str(k) for k in structure['key_phrases'])}")
+                            prompt_tpl = structure.get('suggested_prompt_template','')
+                            if prompt_tpl:
+                                st.markdown("**نموذج الموجّه المقترح:**")
+                                import html as _html2
+                                _esc = _html2.escape(str(prompt_tpl)).replace("\n","<br>")
+                                st.markdown(
+                                    f'''<div style="direction:rtl;text-align:right;font-family:'Cairo',sans-serif;
+                                    font-size:0.88rem;line-height:1.8;background:#f4fbf6;border-radius:8px;
+                                    padding:0.85rem;color:#145a32;border:1px dashed #27ae60;white-space:pre-wrap;">
+                                    {_esc}</div>''',
+                                    unsafe_allow_html=True)
                         else:
                             st.error(f"فشل التحليل: {structure.get('error')}")
                     except Exception as _tmpl_err:
