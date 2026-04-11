@@ -2974,7 +2974,8 @@ with tab_ex:
 # GEOMETRY VISUALIZER — appended to Exercise Tab
 # ══════════════════════════════════════════════════
     st.markdown("---")
-    if not (_MPL_AVAILABLE and _NP_AVAILABLE):
+    _mpl_ok = _get_mpl()[2]; _np_ok = _get_np()[1]
+    if not (_mpl_ok and _np_ok):
         st.info("⚠️ أضف `matplotlib>=3.8.0` و `numpy>=1.26.0` إلى requirements.txt لتفعيل الأشكال الهندسية.")
     else:
         pass  # geometry widget loads below
