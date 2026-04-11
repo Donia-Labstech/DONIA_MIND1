@@ -16,6 +16,11 @@ from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 import plotly.express as px
 import plotly.graph_objects as go
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import numpy as np
 import pandas as pd
 from PIL import Image
 import openpyxl
@@ -330,25 +335,26 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     pdf.add_page()
     subj = exam_data.get("subject", "")
     rtl, _ = get_pdf_mode_for_subject(subj)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=10)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
-    pdf.cell(95, 8, reshape_arabic(exam_data.get("school", "")) if rtl else exam_data.get("school", ""), border=1, align='C')
-    pdf.cell(95, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية") if rtl else "Algerian Republic", border=1, ln=True, align='C')
-    pdf.cell(95, 8, reshape_arabic(f"المستوى: {exam_data.get('grade', '')}") if rtl else f"Level: {exam_data.get('grade', '')}", border=1)
-    pdf.cell(95, 8, reshape_arabic(f"المدة: {exam_data.get('duration', '')}") if rtl else f"Duration: {exam_data.get('duration', '')}", border=1, ln=True)
+    pdf.set_sized_font(10)
+    pdf.cell(95, 8, pdf._safe_text(exam_data.get("school", ""), rtl), border=1, align='C')
+    pdf.cell(95, 8,
+             pdf._safe_text("الجمهورية الجزائرية الديمقراطية الشعبية", rtl) if rtl else "Algerian Republic",
+             border=1, ln=True, align='C')
+    pdf.cell(95, 8,
+             pdf._safe_text(f"المستوى: {exam_data.get('grade', '')}", rtl) if rtl else f"Level: {exam_data.get('grade', '')}",
+             border=1)
+    pdf.cell(95, 8,
+             pdf._safe_text(f"المدة: {exam_data.get('duration', '')}", rtl) if rtl else f"Duration: {exam_data.get('duration', '')}",
+             border=1, ln=True)
     pdf.ln(8)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", 'B', 14)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 14)
-    title = f"اختبار {exam_data.get('semester', '')} في مادة {subj}" if rtl else f"Exam — {exam_data.get('semester', '')} — {subj}"
-    pdf.cell(0, 10, reshape_arabic(title) if rtl else title, ln=True, align='C')
+    pdf.set_sized_font(14, bold=True)
+    title = (f"اختبار {exam_data.get('semester', '')} في مادة {subj}"
+             if rtl else f"Exam — {exam_data.get('semester', '')} — {subj}")
+    pdf.cell(0, 10, pdf._safe_text(title, rtl) if rtl else title, ln=True, align='C')
     pdf.ln(5)
     pdf.set_sized_font(11)
-    content = exam_data.get("content", "")
-    for line in content.splitlines():
+    content_text = exam_data.get("content", "")
+    for line in content_text.splitlines():
         line = line.strip()
         if not line:
             pdf.ln(2)
@@ -357,112 +363,88 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
         pdf.ln(1)
     pdf.set_y(-15)
     pdf.set_sized_font(8)
-    pdf.cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
+    pdf.cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR, rtl), align='C')
     return bytes(pdf.output())
-
 def generate_report_pdf(report_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=12)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=12)
-    pdf.cell(0, 10, reshape_arabic("تحليل نتائج الأقسام"), ln=True, align='C')
+    pdf.set_sized_font(12)
+    pdf.cell(0, 10, pdf._safe_text("تحليل نتائج الأقسام"), ln=True, align='C')
     pdf.ln(5)
     for cls in report_data.get('classes', []):
-        if pdf.use_amiri:
-            pdf.set_font("Amiri", 'B', 12)
-        else:
-            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 12)
-        pdf.cell(0, 8, reshape_arabic(f"القسم: {cls['name']}"), ln=True, align='R')
-        if pdf.use_amiri:
-            pdf.set_font("Amiri", size=11)
-        else:
-            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=11)
+        pdf.set_sized_font(12, bold=True)
+        pdf.cell(0, 8, pdf._safe_text(f"القسم: {cls['name']}"), ln=True, align='R')
+        pdf.set_sized_font(11)
         stats = f"عدد التلاميذ: {cls.get('total',0)}  |  المعدل: {cls.get('avg',0):.2f}  |  النجاح: {cls.get('pass_rate',0):.1f}%"
         pdf.multi_cell_text(stats, 190, align='R', rtl=True)
         pdf.ln(4)
         if cls.get('top5'):
-            if pdf.use_amiri:
-                pdf.set_font("Amiri", 'B', 11)
-            else:
-                pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 11)
-            pdf.cell(0, 6, reshape_arabic("أفضل 5 تلاميذ"), ln=True, align='R')
-            if pdf.use_amiri:
-                pdf.set_font("Amiri", size=10)
-            else:
-                pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
+            pdf.set_sized_font(11, bold=True)
+            pdf.cell(0, 6, pdf._safe_text("أفضل 5 تلاميذ"), ln=True, align='R')
+            pdf.set_sized_font(10)
             for i, s in enumerate(cls['top5'][:5], 1):
-                pdf.cell(0, 5, reshape_arabic(f"{i}. {s['name']} — {s['avg']:.2f}"), ln=True, align='R')
+                pdf.cell(0, 5, pdf._safe_text(f"{i}. {s['name']} — {s['avg']:.2f}"), ln=True, align='R')
         pdf.ln(6)
     if report_data.get('ai_analysis'):
-        if pdf.use_amiri:
-            pdf.set_font("Amiri", 'B', 11)
-        else:
-            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 11)
-        pdf.cell(0, 8, reshape_arabic("التحليل البيداغوجي"), ln=True, align='R')
-        if pdf.use_amiri:
-            pdf.set_font("Amiri", size=10)
-        else:
-            pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
+        pdf.set_sized_font(11, bold=True)
+        pdf.cell(0, 8, pdf._safe_text("التحليل البيداغوجي"), ln=True, align='R')
+        pdf.set_sized_font(10)
         for line in report_data['ai_analysis'].splitlines():
             if line.strip():
                 pdf.multi_cell_text(line, 190, align='R', rtl=True)
     pdf.set_y(-15)
     pdf.set_sized_font(8)
-    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
+    pdf.cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR), align='C')
     return bytes(pdf.output())
-
 def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
     pdf.set_sized_font(11)
-    pdf.cell(0, 8, reshape_arabic("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
-    pdf.cell(0, 8, reshape_arabic("وزارة التربية الوطنية"), ln=True, align='C')
+    pdf.cell(0, 8, pdf._safe_text("الجمهورية الجزائرية الديمقراطية الشعبية"), ln=True, align='C')
+    pdf.cell(0, 8, pdf._safe_text("وزارة التربية الوطنية"), ln=True, align='C')
     pdf.ln(4)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", 'B', 13)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", 'B', 13)
-    pdf.cell(0, 8, reshape_arabic(f"مذكرة رقم: ____ | المؤسسة: {plan_data.get('school','')} | الأستاذ(ة): {plan_data.get('teacher','')}"), ln=True, align='R')
+    pdf.set_sized_font(13, bold=True)
+    header_text = (f"مذكرة رقم: ____ | المؤسسة: {plan_data.get('school','')} | "
+                   f"الأستاذ(ة): {plan_data.get('teacher','')}")
+    pdf.cell(0, 8, pdf._safe_text(header_text), ln=True, align='R')
     pdf.ln(5)
-    if pdf.use_amiri:
-        pdf.set_font("Amiri", size=10)
-    else:
-        pdf.set_font("DejaVu" if "DejaVu" in pdf.fonts else "Helvetica", size=10)
+    pdf.set_sized_font(10)
     info = [
-        ("الميدان", plan_data.get('domain','')), ("المستوى", plan_data.get('grade','')),
-        ("الباب", plan_data.get('chapter','')), ("المدة", plan_data.get('duration','')),
-        ("المورد المعرفي", plan_data.get('lesson','')), ("نوع الحصة", plan_data.get('session_type',''))
+        ("الميدان",         plan_data.get('domain', '')),
+        ("المستوى",         plan_data.get('grade', '')),
+        ("الباب",           plan_data.get('chapter', '')),
+        ("المدة",           plan_data.get('duration', '')),
+        ("المورد المعرفي",  plan_data.get('lesson', '')),
+        ("نوع الحصة",       plan_data.get('session_type', '')),
     ]
     for i in range(0, len(info), 2):
-        pdf.cell(45, 7, reshape_arabic(info[i][0]), border=1)
-        pdf.cell(50, 7, reshape_arabic(info[i][1]), border=1)
-        pdf.cell(45, 7, reshape_arabic(info[i+1][0]), border=1)
-        pdf.cell(50, 7, reshape_arabic(info[i+1][1]), border=1, ln=True)
+        pdf.cell(45, 7, pdf._safe_text(info[i][0]),   border=1)
+        pdf.cell(50, 7, pdf._safe_text(info[i][1]),   border=1)
+        pdf.cell(45, 7, pdf._safe_text(info[i+1][0]), border=1)
+        pdf.cell(50, 7, pdf._safe_text(info[i+1][1]), border=1, ln=True)
     pdf.ln(5)
-    stages = ["المرحلة", "المدة", "سير الدرس", "التقويم"]
-    for s in stages:
-        pdf.cell(47.5, 7, reshape_arabic(s), border=1)
+    for s in ["المرحلة", "المدة", "سير الدرس", "التقويم"]:
+        pdf.cell(47.5, 7, pdf._safe_text(s), border=1)
     pdf.ln()
     rows = [
-        ("تهيئة", plan_data.get('duration_t','5 د'), plan_data.get('intro',''), plan_data.get('eval','')),
-        ("بناء الموارد", plan_data.get('duration_b','25 د'), plan_data.get('build',''), ""),
-        ("إعادة الاستثمار", plan_data.get('duration_r','15 د'), plan_data.get('reinvest',''), ""),
-        ("الواجب المنزلي", "", plan_data.get('homework',''), "")
+        ("تهيئة",            plan_data.get('duration_t', '5 د'),  plan_data.get('intro', ''),    plan_data.get('eval', '')),
+        ("بناء الموارد",     plan_data.get('duration_b', '25 د'), plan_data.get('build', ''),    ""),
+        ("إعادة الاستثمار", plan_data.get('duration_r', '15 د'), plan_data.get('reinvest', ''), ""),
+        ("الواجب المنزلي",  "",                                    plan_data.get('homework', ''), ""),
     ]
     for row in rows:
-        pdf.cell(47.5, 40, reshape_arabic(row[0]), border=1)
-        pdf.cell(47.5, 40, reshape_arabic(row[1]), border=1)
-        pdf.multi_cell(47.5, 5, reshape_arabic(row[2]), border=1)
-        pdf.cell(47.5, 40, reshape_arabic(row[3]), border=1)
+        pdf.cell(47.5, 40, pdf._safe_text(row[0]), border=1)
+        pdf.cell(47.5, 40, pdf._safe_text(row[1]), border=1)
+        pdf.multi_cell(47.5, 5, pdf._safe_text(row[2]), border=1)
+        pdf.cell(47.5, 40, pdf._safe_text(row[3]), border=1)
         pdf.ln()
     pdf.set_y(-15)
     pdf.set_sized_font(8)
-    pdf.cell(0, 10, reshape_arabic(COPYRIGHT_FOOTER_AR), align='C')
+    pdf.cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR), align='C')
     return bytes(pdf.output())
+
 
 # ========== DOCX generators ==========
 def _docx_set_rtl(paragraph):
@@ -638,12 +620,12 @@ def get_arcee_client():
 
 def test_arcee_connection() -> bool:
     """
-    FIXED: Try SDK first; fall back to direct HTTP REST probe.
-    Returns True if the key is valid / server reachable.
+    FIXED v5.1: Try SDK first; fall back to direct HTTP REST probe.
+    Returns True only if the API key is valid and the server is reachable.
     """
     if not ARCEE_API_KEY:
         return False
-    # 1) SDK path
+    # Path 1: official SDK
     if _ARCEE_AVAILABLE:
         try:
             client = get_arcee_client()
@@ -656,10 +638,11 @@ def test_arcee_connection() -> bool:
                     return True
         except Exception:
             pass
-    # 2) Direct HTTP probe (works even without SDK)
+    # Path 2: direct HTTP probe (works without SDK)
     for endpoint in [
         "https://models.arcee.ai/v1/models",
         "https://api.arcee.ai/v2/models",
+        "https://api.arcee.ai/v1/models",
     ]:
         try:
             resp = requests.get(
@@ -667,13 +650,13 @@ def test_arcee_connection() -> bool:
                 headers={"Authorization": f"Bearer {ARCEE_API_KEY}"},
                 timeout=7,
             )
-            # 200 = OK, 401/403 = auth error but server alive = key issue not network
-            if resp.status_code in (200, 401, 403):
-                return resp.status_code == 200
+            if resp.status_code == 200:
+                return True
+            if resp.status_code in (401, 403):
+                return False   # Key rejected — server alive but key wrong
         except Exception:
             continue
     return False
-
 def call_arcee_generate(prompt: str) -> str:
     if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
         raise Exception("Arcee not available")
@@ -854,35 +837,235 @@ def web_search(query: str, max_results: int = 3) -> str:
         st.warning(f"فشل البحث: {e}")
         return ""
 
+def _fig_to_bytes(fig) -> bytes:
+    """Save a matplotlib figure to PNG bytes."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", dpi=130,
+                facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+def _safe_eval_expr(expr_str: str, x_arr):
+    """Safely evaluate a math expression with numpy vectors."""
+    allowed = {
+        'x': x_arr, 'abs': np.abs, 'sin': np.sin, 'cos': np.cos,
+        'tan': np.tan, 'exp': np.exp, 'log': np.log, 'sqrt': np.sqrt,
+        'pi': np.pi, 'e': np.e, 'arcsin': np.arcsin, 'arccos': np.arccos,
+        'arctan': np.arctan, 'sinh': np.sinh, 'cosh': np.cosh,
+        'tanh': np.tanh, 'log2': np.log2, 'log10': np.log10,
+    }
+    return eval(expr_str, {"__builtins__": {}}, allowed)
+
+
+def generate_geometry_figure(shape: str, params: dict) -> bytes:
+    """
+    Draw a geometric shape with Matplotlib and return PNG bytes.
+    Shapes: circle | rectangle | triangle | right_triangle |
+            parallelogram | trapezoid
+    """
+    fig, ax = plt.subplots(figsize=(5, 5), facecolor='#f8fff9')
+    ax.set_aspect('equal')
+    ax.set_facecolor('#f8fff9')
+    for spine in ax.spines.values():
+        spine.set_color('#cccccc')
+    ax.tick_params(colors='#555555')
+    C_EDGE  = '#145a32'
+    C_FILL  = '#d5f5e3'
+    C_DIM1  = '#c0392b'
+    C_DIM2  = '#1a5276'
+    C_DIM3  = '#7d3c98'
+
+    if shape == 'circle':
+        r = float(params.get('r', 3))
+        circ = plt.Circle((0, 0), r, edgecolor=C_EDGE, facecolor=C_FILL, lw=2.5)
+        ax.add_patch(circ)
+        ax.plot([0, r], [0, 0], color=C_DIM1, lw=1.8, ls='--')
+        ax.text(r / 2, 0.22, f'r = {r}', color=C_DIM1, ha='center', fontsize=11, fontweight='bold')
+        ax.set_xlim(-r*1.35, r*1.35); ax.set_ylim(-r*1.35, r*1.35)
+        ax.set_title(f'دائرة  |  r = {r}  |  S = {3.14159*r**2:.3f}  |  P = {2*3.14159*r:.3f}', fontsize=11)
+
+    elif shape == 'rectangle':
+        w = float(params.get('w', 6)); h = float(params.get('h', 4))
+        rect = mpatches.FancyBboxPatch((0, 0), w, h,
+               boxstyle="square,pad=0", edgecolor=C_EDGE, facecolor=C_FILL, lw=2.5)
+        ax.add_patch(rect)
+        ax.annotate('', xy=(w, -0.3), xytext=(0, -0.3),
+                    arrowprops=dict(arrowstyle='<->', color=C_DIM1, lw=1.5))
+        ax.text(w/2, -0.55, f'L = {w}', ha='center', fontsize=11, color=C_DIM1, fontweight='bold')
+        ax.annotate('', xy=(w+0.3, h), xytext=(w+0.3, 0),
+                    arrowprops=dict(arrowstyle='<->', color=C_DIM2, lw=1.5))
+        ax.text(w+0.6, h/2, f'l = {h}', ha='left', fontsize=11, color=C_DIM2, fontweight='bold', va='center')
+        ax.set_xlim(-0.4, w+1); ax.set_ylim(-0.7, h+0.4)
+        ax.set_title(f'مستطيل  |  S = {w*h}  |  P = {2*(w+h)}', fontsize=11)
+
+    elif shape == 'triangle':
+        a = float(params.get('a', 5)); h = float(params.get('h', 4)); b_side = float(params.get('b', 4.5))
+        pts = np.array([[0,0],[a,0],[a/2,h],[0,0]])
+        ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
+        ax.plot([a/2, a/2], [0, h], color=C_DIM1, lw=1.5, ls='--')
+        ax.text(a/2, -0.3, f'a = {a}', ha='center', fontsize=11, color=C_DIM1, fontweight='bold')
+        ax.text(a/2+0.2, h/2, f'h = {h}', ha='left', fontsize=10, color=C_DIM2)
+        ax.set_xlim(-0.5, a+0.5); ax.set_ylim(-0.5, h+0.4)
+        ax.set_title(f'مثلث  |  S = {0.5*a*h:.3f}  |  a = {a}  h = {h}', fontsize=11)
+
+    elif shape == 'right_triangle':
+        a = float(params.get('a', 3)); b = float(params.get('b', 4))
+        hyp = np.sqrt(a**2 + b**2)
+        pts = np.array([[0,0],[a,0],[0,b],[0,0]])
+        ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
+        sq = 0.28
+        ax.plot([sq, sq, 0], [0, sq, sq], color=C_EDGE, lw=1.5)
+        ax.annotate('', xy=(a,-0.3), xytext=(0,-0.3),
+                    arrowprops=dict(arrowstyle='<->', color=C_DIM1, lw=1.5))
+        ax.text(a/2, -0.55, f'{a}', ha='center', fontsize=12, color=C_DIM1, fontweight='bold')
+        ax.annotate('', xy=(-0.35, b), xytext=(-0.35, 0),
+                    arrowprops=dict(arrowstyle='<->', color=C_DIM2, lw=1.5))
+        ax.text(-0.6, b/2, f'{b}', ha='right', fontsize=12, color=C_DIM2, fontweight='bold', va='center')
+        ax.text(a/2+0.2, b/2, f'c = {hyp:.3f}', fontsize=10, color=C_DIM3,
+                rotation=-np.degrees(np.arctan2(b, a)))
+        ax.set_xlim(-0.9, a+0.5); ax.set_ylim(-0.7, b+0.4)
+        ax.set_title(f'مثلث قائم  |  وتر = {hyp:.3f}  |  S = {0.5*a*b:.3f}', fontsize=11)
+
+    elif shape == 'parallelogram':
+        b = float(params.get('b', 6)); h = float(params.get('h', 3)); sk = float(params.get('skew', 1.5))
+        pts = np.array([[0,0],[b,0],[b+sk,h],[sk,h],[0,0]])
+        ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
+        ax.plot([sk, sk], [0, h], color=C_DIM1, lw=1.5, ls='--')
+        ax.text(b/2+sk/2, -0.3, f'b = {b}', ha='center', fontsize=11, color=C_DIM1, fontweight='bold')
+        ax.text(sk+0.15, h/2, f'h = {h}', ha='left', fontsize=11, color=C_DIM2, fontweight='bold', va='center')
+        ax.set_xlim(-0.5, b+sk+0.5); ax.set_ylim(-0.5, h+0.4)
+        ax.set_title(f'متوازي أضلاع  |  S = {b*h}  |  b = {b}  h = {h}', fontsize=11)
+
+    elif shape == 'trapezoid':
+        a = float(params.get('a', 6)); b = float(params.get('b', 3)); h = float(params.get('h', 3))
+        off = (a - b) / 2
+        pts = np.array([[0,0],[a,0],[a-off,h],[off,h],[0,0]])
+        ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
+        ax.plot([off, off], [0, h], color=C_DIM1, lw=1.5, ls='--')
+        ax.text(a/2, -0.3, f'a = {a}', ha='center', fontsize=11, color=C_DIM1, fontweight='bold')
+        ax.text(a/2, h+0.15, f'b = {b}', ha='center', fontsize=11, color=C_DIM2, fontweight='bold')
+        ax.text(off-0.2, h/2, f'h = {h}', ha='right', fontsize=11, color=C_DIM3, fontweight='bold', va='center')
+        ax.set_xlim(-0.5, a+0.5); ax.set_ylim(-0.5, h+0.5)
+        ax.set_title(f'شبه منحرف  |  S = {0.5*(a+b)*h:.3f}  |  a={a}  b={b}  h={h}', fontsize=11)
+
+    ax.grid(True, alpha=0.25, color='#aaaaaa', ls='--')
+    return _fig_to_bytes(fig)
+
+
+def generate_function_plot(expr_str: str, x_range=(-10, 10), label: str = "") -> bytes:
+    """Plot a mathematical function f(x) and return PNG bytes."""
+    x = np.linspace(x_range[0], x_range[1], 600)
+    expr_clean = expr_str.replace('^', '**').replace('×', '*')
+    try:
+        y = _safe_eval_expr(expr_clean, x)
+        y = np.where(np.abs(y) > 1e5, np.nan, y.astype(float))
+    except Exception:
+        return b""
+    fig, ax = plt.subplots(figsize=(8, 4.5), facecolor='#f8fff9')
+    ax.set_facecolor('#f8fff9')
+    ax.axhline(0, color='#888', lw=0.9, zorder=1)
+    ax.axvline(0, color='#888', lw=0.9, zorder=1)
+    ax.plot(x, y, color='#145a32', lw=2.5, zorder=2,
+            label=label or f'f(x) = {expr_str}')
+    ax.grid(True, alpha=0.3, ls='--')
+    ax.legend(fontsize=11)
+    ax.set_title(f'f(x) = {expr_str}', fontsize=13)
+    ax.set_xlabel('x', fontsize=11); ax.set_ylabel('f(x)', fontsize=11)
+    return _fig_to_bytes(fig)
+
+
 def auto_generate_plots(content: str, subject: str) -> list:
+    """
+    ENHANCED v5.1: Returns list of (type, data) tuples.
+    type = 'plotly'  → data is a Plotly Figure
+    type = 'image'   → data is PNG bytes (Matplotlib)
+    Auto-detects functions and geometric shapes from generated text.
+    """
     plots = []
-    subject_lower = subject.lower()
-    if any(k in subject_lower for k in ["رياضيات", "math", "mathematics", "فيزياء", "physics"]):
-        func_pattern = r'f\(x\)\s*=\s*([\d\.]+x[\^0-9\s\+\-\*\/]+)'
-        matches = re.findall(func_pattern, content)
-        if matches:
-            for expr in matches[:2]:
-                try:
-                    import numpy as np
-                    x = np.linspace(-10, 10, 100)
-                    expr_clean = expr.replace('^', '**')
-                    def safe_eval(expr_str, x_val):
-                        allowed = {'x': x_val, 'abs': abs, 'sin': np.sin, 'cos': np.cos, 'tan': np.tan, 'exp': np.exp, 'log': np.log, 'sqrt': np.sqrt}
-                        return eval(expr_str, {"__builtins__": {}}, allowed)
-                    y = [safe_eval(expr_clean, xv) for xv in x]
-                    fig = go.Figure(data=go.Scatter(x=x, y=y, mode='lines', name=f'f(x) = {expr}'))
-                    fig.update_layout(title=f"تمثيل الدالة {expr}", xaxis_title="x", yaxis_title="f(x)", template="plotly_dark")
-                    plots.append(fig)
-                except:
-                    pass
-        stat_pattern = r'(\d+)\s*,\s*(\d+)'
-        numbers = re.findall(stat_pattern, content)
-        if len(numbers) >= 3:
-            df = pd.DataFrame(numbers, columns=["X", "Y"])
-            df = df.astype(float)
-            fig = px.scatter(df, x="X", y="Y", title="تمثيل البيانات الإحصائية", template="plotly_dark")
-            plots.append(fig)
+    subject_lower = (subject or "").lower()
+    is_math = any(k in subject_lower for k in [
+        "رياضيات", "math", "mathematics", "فيزياء", "physics",
+        "ميكانيك", "جبر", "هندسة", "algebra", "geometry"
+    ])
+    if not is_math:
+        return plots
+
+    # ── Plotly: explicit f(x)=... patterns ──
+    func_pattern = r'f\s*\(\s*x\s*\)\s*=\s*([\d\.\w\s\^\+\-\*\/\(\)]+)'
+    for expr in re.findall(r'f\s*\(\s*x\s*\)\s*=\s*([\d\.\w\s\^\+\-\*\/\(\)]+)', content)[:3]:
+        expr_clean = expr.strip().replace('^', '**')
+        try:
+            x_v = np.linspace(-10, 10, 300)
+            y_v = _safe_eval_expr(expr_clean, x_v)
+            y_v = np.where(np.abs(y_v) > 1e5, np.nan, y_v.astype(float))
+            fig = go.Figure(go.Scatter(
+                x=x_v, y=y_v, mode='lines',
+                name=f'f(x)={expr.strip()}',
+                line=dict(color='#145a32', width=2.5)
+            ))
+            fig.update_layout(title=f'f(x) = {expr.strip()}',
+                              xaxis_title='x', yaxis_title='f(x)',
+                              template='plotly_white', height=360)
+            plots.append(("plotly", fig))
+        except Exception:
+            pass
+
+    # ── Statistical scatter from (x, y) pairs ──
+    numbers = re.findall(r'(\d+)\s*,\s*(\d+)', content)
+    if len(numbers) >= 3:
+        df = pd.DataFrame(numbers[:20], columns=["X", "Y"]).astype(float)
+        fig2 = px.scatter(df, x="X", y="Y",
+                          title="تمثيل البيانات الإحصائية", template="plotly_white")
+        fig2.update_traces(marker=dict(color='#c0392b', size=9))
+        plots.append(("plotly", fig2))
+
+    # ── Matplotlib geometry auto-detection ──
+    geo_map = {
+        "دائرة":           "circle",
+        "circle":          "circle",
+        "مثلث قائم":       "right_triangle",
+        "right triangle":  "right_triangle",
+        "مثلث":            "triangle",
+        "triangle":        "triangle",
+        "مستطيل":          "rectangle",
+        "rectangle":       "rectangle",
+        "متوازي أضلاع":    "parallelogram",
+        "parallelogram":   "parallelogram",
+        "شبه منحرف":       "trapezoid",
+        "trapezoid":       "trapezoid",
+    }
+    content_lower = content.lower()
+    drawn = set()
+    for kw, shape in geo_map.items():
+        if kw not in content_lower or shape in drawn:
+            continue
+        hit = content_lower.find(kw)
+        nums = re.findall(r'(\d+(?:\.\d+)?)', content[hit:hit+100])
+        nums = re.findall(r'(\d+(?:\.\d+)?)', content[hit:hit+100])
+        p = {}
+        if shape == 'circle' and nums:
+            p['r'] = nums[0]
+        elif shape in ('triangle', 'right_triangle') and len(nums) >= 2:
+            p['a'] = nums[0]; p['b'] = nums[1]
+            if len(nums) >= 3: p['h'] = nums[2]
+        elif shape == 'rectangle' and len(nums) >= 2:
+            p['w'] = nums[0]; p['h'] = nums[1]
+        elif shape == 'trapezoid' and len(nums) >= 2:
+            p['a'] = nums[0]; p['b'] = nums[1]
+            if len(nums) >= 3: p['h'] = nums[2]
+        elif shape == 'parallelogram' and len(nums) >= 2:
+            p['b'] = nums[0]; p['h'] = nums[1]
+        try:
+            img = generate_geometry_figure(shape, p)
+            if img:
+                plots.append(("image", img))
+                drawn.add(shape)
+        except Exception:
+            pass
     return plots
+
 
 # Template learning functions
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
@@ -2092,8 +2275,11 @@ with tab_plan:
                     render_with_latex(plan_text)
 
                     plots = auto_generate_plots(plan_text, subject)
-                    for fig in plots:
-                        st.plotly_chart(fig, use_container_width=True)
+                    for _ptype, _pdata in plots:
+                        if _ptype == "plotly":
+                            st.plotly_chart(_pdata, use_container_width=True)
+                        elif _ptype == "image":
+                            st.image(_pdata, use_container_width=True)
 
                     def extract_section(text, marker):
                         m = re.search(rf'## {marker}[^\n]*\n([\s\S]+?)(?=## |\Z)', text)
@@ -2272,8 +2458,11 @@ with tab_exam:
                         unsafe_allow_html=True)
                     render_with_latex(exam_content)
                     plots = auto_generate_plots(exam_content, subject)
-                    for fig in plots:
-                        st.plotly_chart(fig, use_container_width=True)
+                    for _ptype, _pdata in plots:
+                        if _ptype == "plotly":
+                            st.plotly_chart(_pdata, use_container_width=True)
+                        elif _ptype == "image":
+                            st.image(_pdata, use_container_width=True)
                     db_exec(
                         "INSERT INTO exams (level,grade,subject,semester,content,created_at) "
                         "VALUES (?,?,?,?,?,?)",
@@ -2696,8 +2885,11 @@ with tab_ex:
                     res_text = call_llm(llm, prompt)
                     render_with_latex(res_text)
                     plots = auto_generate_plots(res_text, subject)
-                    for fig in plots:
-                        st.plotly_chart(fig, use_container_width=True)
+                    for _ptype, _pdata in plots:
+                        if _ptype == "plotly":
+                            st.plotly_chart(_pdata, use_container_width=True)
+                        elif _ptype == "image":
+                            st.image(_pdata, use_container_width=True)
                     db_exec(
                         "INSERT INTO exercises "
                         "(level,grade,branch,subject,lesson,ex_type,difficulty,content,created_at) "
@@ -2749,6 +2941,105 @@ with tab_ex:
                         st.success("✅ تم حفظ التمرين في قاعدة المعرفة RAG")
                 except Exception as err:
                     st.error(f"❌ {err}")
+
+
+# ══════════════════════════════════════════════════
+# GEOMETRY VISUALIZER — appended to Exercise Tab
+# ══════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("### 📐 مُوَلِّد الأشكال الهندسية التفاعلي")
+    st.markdown(
+        '<div class="template-box">🔷 ارسم أي شكل هندسي وأحسب مساحته ومحيطه تلقائياً</div>',
+        unsafe_allow_html=True)
+    g1, g2 = st.columns([1, 2])
+    with g1:
+        geo_shape = st.selectbox("الشكل:", [
+            "دائرة", "مستطيل", "مثلث", "مثلث قائم",
+            "متوازي أضلاع", "شبه منحرف"], key="geo_shape")
+        _gp = {}
+        if geo_shape == "دائرة":
+            _gp['r'] = st.number_input("r", 0.5, 50.0, 3.0, key="gr")
+            _ga = 3.14159 * _gp['r']**2; _gpe = 2 * 3.14159 * _gp['r']
+        elif geo_shape == "مستطيل":
+            _gp['w'] = st.number_input("L", 0.5, 50.0, 6.0, key="gw")
+            _gp['h'] = st.number_input("l", 0.5, 50.0, 4.0, key="gh")
+            _ga = _gp['w']*_gp['h']; _gpe = 2*(_gp['w']+_gp['h'])
+        elif geo_shape == "مثلث":
+            _gp['a'] = st.number_input("القاعدة a", 0.5, 50.0, 5.0, key="gta")
+            _gp['h'] = st.number_input("الارتفاع h", 0.5, 50.0, 4.0, key="gth")
+            _ga = 0.5*_gp['a']*_gp['h']; _gpe = 0
+        elif geo_shape == "مثلث قائم":
+            _gp['a'] = st.number_input("a", 0.5, 50.0, 3.0, key="grta")
+            _gp['b'] = st.number_input("b", 0.5, 50.0, 4.0, key="grtb")
+            _hyp = np.sqrt(_gp['a']**2 + _gp['b']**2)
+            _ga = 0.5*_gp['a']*_gp['b']; _gpe = _gp['a']+_gp['b']+_hyp
+            st.info(f"الوتر = {_hyp:.4f}")
+        elif geo_shape == "متوازي أضلاع":
+            _gp['b'] = st.number_input("b", 0.5, 50.0, 6.0, key="gpb")
+            _gp['h'] = st.number_input("h", 0.5, 50.0, 3.0, key="gph")
+            _gp['skew'] = st.number_input("ميل", 0.1, 10.0, 1.5, key="gsk")
+            _ga = _gp['b']*_gp['h']; _gpe = 2*(_gp['b'] + np.sqrt(_gp['h']**2+_gp['skew']**2))
+        elif geo_shape == "شبه منحرف":
+            _gp['a'] = st.number_input("a", 0.5, 50.0, 6.0, key="gtra")
+            _gp['b'] = st.number_input("b", 0.5, 50.0, 3.0, key="gtrb")
+            _gp['h'] = st.number_input("h", 0.5, 50.0, 3.0, key="gtrh")
+            _ga = 0.5*(_gp['a']+_gp['b'])*_gp['h']
+            _gpe = _gp['a']+_gp['b']+2*np.sqrt(_gp['h']**2+((_gp['a']-_gp['b'])/2)**2)
+        else:
+            _ga = _gpe = 0.0
+        _shape_code = {"دائرة":"circle","مستطيل":"rectangle","مثلث":"triangle",
+                       "مثلث قائم":"right_triangle","متوازي أضلاع":"parallelogram",
+                       "شبه منحرف":"trapezoid"}
+        st.markdown(
+            f'<div class="success-box">📐 المساحة = <b>{_ga:.4f}</b> وحدة²<br>'
+            f'📏 المحيط ≈ <b>{_gpe:.4f}</b> وحدة</div>',
+            unsafe_allow_html=True)
+        if st.button("🎨 رسم الشكل", key="btn_geo"):
+            try:
+                _img = generate_geometry_figure(_shape_code[geo_shape], _gp)
+                st.session_state["_geo_img"]  = _img
+                st.session_state["_geo_name"] = geo_shape
+            except Exception as _ge:
+                st.error(f"خطأ: {_ge}")
+    with g2:
+        if st.session_state.get("_geo_img"):
+            st.image(st.session_state["_geo_img"],
+                     caption=st.session_state.get("_geo_name",""),
+                     use_container_width=True)
+            st.download_button("⬇️ PNG", st.session_state["_geo_img"],
+                               f"شكل_{st.session_state.get('_geo_name','geo')}.png",
+                               "image/png", key="dl_geo")
+        else:
+            st.info("اضغط 'رسم الشكل' لعرضه.")
+
+    st.markdown("---")
+    st.markdown("### 📈 رسم الدوال الرياضية")
+    fp1, fp2 = st.columns([1, 2])
+    with fp1:
+        _fx = st.text_input("f(x) =", value="x**2 - 4", key="fx_expr",
+                             help="مثال: sin(x), 2*x+3, x**3-x, sqrt(abs(x))")
+        _xmin = st.number_input("x الأدنى", value=-10.0, key="fx_xmin")
+        _xmax = st.number_input("x الأعلى", value=10.0,  key="fx_xmax")
+        if st.button("📊 رسم الدالة", key="btn_fx"):
+            try:
+                _fimg = generate_function_plot(_fx, (_xmin, _xmax), f"f(x)={_fx}")
+                if _fimg:
+                    st.session_state["_fx_img"]   = _fimg
+                    st.session_state["_fx_label"] = _fx
+                else:
+                    st.error("تعذر رسم الدالة — راجع الصياغة.")
+            except Exception as _fe:
+                st.error(f"خطأ: {_fe}")
+    with fp2:
+        if st.session_state.get("_fx_img"):
+            st.image(st.session_state["_fx_img"],
+                     caption=f"f(x) = {st.session_state.get('_fx_label','')}",
+                     use_container_width=True)
+            st.download_button("⬇️ PNG", st.session_state["_fx_img"],
+                               "دالة_رياضية.png", "image/png", key="dl_fx")
+        else:
+            st.info("أدخل دالة واضغط 'رسم الدالة'.")
+
 
 # ========== TAB 6 — Correction ==========
 with tab_correct:
