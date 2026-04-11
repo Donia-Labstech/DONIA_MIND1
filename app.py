@@ -16,11 +16,7 @@ from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 import plotly.express as px
 import plotly.graph_objects as go
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import numpy as np
+
 import pandas as pd
 from PIL import Image
 import openpyxl
@@ -837,18 +833,53 @@ def web_search(query: str, max_results: int = 3) -> str:
         st.warning(f"فشل البحث: {e}")
         return ""
 
+# ═══════════════════════════════════════════════════════════
+# GEOMETRY & PLOT ENGINE — lazy imports (safe on Streamlit Cloud)
+# ═══════════════════════════════════════════════════════════
+
+def _get_mpl():
+    """Lazy-load matplotlib. Returns (plt, mpatches, True) or (None, None, False)."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as _plt
+        import matplotlib.patches as _mp
+        return _plt, _mp, True
+    except Exception:
+        return None, None, False
+
+
+def _get_np():
+    """Lazy-load numpy. Returns (np, True) or (None, False)."""
+    try:
+        import numpy as _np
+        return _np, True
+    except Exception:
+        return None, False
+
+
 def _fig_to_bytes(fig) -> bytes:
     """Save a matplotlib figure to PNG bytes."""
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", dpi=130,
-                facecolor=fig.get_facecolor())
-    plt.close(fig)
-    buf.seek(0)
-    return buf.read()
+    plt, _, ok = _get_mpl()
+    if not ok or fig is None:
+        return b""
+    try:
+        import io as _io
+        buf = _io.BytesIO()
+        fig.savefig(buf, format="png", bbox_inches="tight", dpi=130,
+                    facecolor=fig.get_facecolor())
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return b""
 
 
 def _safe_eval_expr(expr_str: str, x_arr):
     """Safely evaluate a math expression with numpy vectors."""
+    np, ok = _get_np()
+    if not ok:
+        return []
     allowed = {
         'x': x_arr, 'abs': np.abs, 'sin': np.sin, 'cos': np.cos,
         'tan': np.tan, 'exp': np.exp, 'log': np.log, 'sqrt': np.sqrt,
@@ -860,130 +891,132 @@ def _safe_eval_expr(expr_str: str, x_arr):
 
 
 def generate_geometry_figure(shape: str, params: dict) -> bytes:
-    """
-    Draw a geometric shape with Matplotlib and return PNG bytes.
-    Shapes: circle | rectangle | triangle | right_triangle |
-            parallelogram | trapezoid
-    """
-    fig, ax = plt.subplots(figsize=(5, 5), facecolor='#f8fff9')
-    ax.set_aspect('equal')
-    ax.set_facecolor('#f8fff9')
-    for spine in ax.spines.values():
-        spine.set_color('#cccccc')
-    ax.tick_params(colors='#555555')
-    C_EDGE  = '#145a32'
-    C_FILL  = '#d5f5e3'
-    C_DIM1  = '#c0392b'
-    C_DIM2  = '#1a5276'
-    C_DIM3  = '#7d3c98'
+    """Draw a geometric shape with Matplotlib — lazy import, safe."""
+    plt, mpatches, mpl_ok = _get_mpl()
+    np, np_ok = _get_np()
+    if not mpl_ok or not np_ok:
+        return b""
+    try:
+        fig, ax = plt.subplots(figsize=(5, 5), facecolor='#f8fff9')
+        ax.set_aspect('equal')
+        ax.set_facecolor('#f8fff9')
+        for spine in ax.spines.values():
+            spine.set_color('#cccccc')
+        C_EDGE = '#145a32'; C_FILL = '#d5f5e3'
+        C_D1 = '#c0392b'; C_D2 = '#1a5276'; C_D3 = '#7d3c98'
 
-    if shape == 'circle':
-        r = float(params.get('r', 3))
-        circ = plt.Circle((0, 0), r, edgecolor=C_EDGE, facecolor=C_FILL, lw=2.5)
-        ax.add_patch(circ)
-        ax.plot([0, r], [0, 0], color=C_DIM1, lw=1.8, ls='--')
-        ax.text(r / 2, 0.22, f'r = {r}', color=C_DIM1, ha='center', fontsize=11, fontweight='bold')
-        ax.set_xlim(-r*1.35, r*1.35); ax.set_ylim(-r*1.35, r*1.35)
-        ax.set_title(f'دائرة  |  r = {r}  |  S = {3.14159*r**2:.3f}  |  P = {2*3.14159*r:.3f}', fontsize=11)
+        if shape == 'circle':
+            r = float(params.get('r', 3))
+            circ = plt.Circle((0, 0), r, edgecolor=C_EDGE, facecolor=C_FILL, lw=2.5)
+            ax.add_patch(circ)
+            ax.plot([0, r], [0, 0], color=C_D1, lw=1.8, ls='--')
+            ax.text(r/2, 0.22, f'r = {r}', color=C_D1, ha='center', fontsize=11, fontweight='bold')
+            ax.set_xlim(-r*1.35, r*1.35); ax.set_ylim(-r*1.35, r*1.35)
+            ax.set_title(f'دائرة  r={r}  |  S={3.14159*r**2:.3f}  |  P={2*3.14159*r:.3f}', fontsize=10)
 
-    elif shape == 'rectangle':
-        w = float(params.get('w', 6)); h = float(params.get('h', 4))
-        rect = mpatches.FancyBboxPatch((0, 0), w, h,
-               boxstyle="square,pad=0", edgecolor=C_EDGE, facecolor=C_FILL, lw=2.5)
-        ax.add_patch(rect)
-        ax.annotate('', xy=(w, -0.3), xytext=(0, -0.3),
-                    arrowprops=dict(arrowstyle='<->', color=C_DIM1, lw=1.5))
-        ax.text(w/2, -0.55, f'L = {w}', ha='center', fontsize=11, color=C_DIM1, fontweight='bold')
-        ax.annotate('', xy=(w+0.3, h), xytext=(w+0.3, 0),
-                    arrowprops=dict(arrowstyle='<->', color=C_DIM2, lw=1.5))
-        ax.text(w+0.6, h/2, f'l = {h}', ha='left', fontsize=11, color=C_DIM2, fontweight='bold', va='center')
-        ax.set_xlim(-0.4, w+1); ax.set_ylim(-0.7, h+0.4)
-        ax.set_title(f'مستطيل  |  S = {w*h}  |  P = {2*(w+h)}', fontsize=11)
+        elif shape == 'rectangle':
+            w = float(params.get('w', 6)); h = float(params.get('h', 4))
+            rect = mpatches.FancyBboxPatch((0,0), w, h, boxstyle="square,pad=0",
+                   edgecolor=C_EDGE, facecolor=C_FILL, lw=2.5)
+            ax.add_patch(rect)
+            ax.annotate('', xy=(w,-0.3), xytext=(0,-0.3),
+                        arrowprops=dict(arrowstyle='<->', color=C_D1, lw=1.5))
+            ax.text(w/2, -0.55, f'L={w}', ha='center', fontsize=11, color=C_D1, fontweight='bold')
+            ax.annotate('', xy=(w+0.3, h), xytext=(w+0.3, 0),
+                        arrowprops=dict(arrowstyle='<->', color=C_D2, lw=1.5))
+            ax.text(w+0.6, h/2, f'l={h}', ha='left', fontsize=11, color=C_D2, fontweight='bold', va='center')
+            ax.set_xlim(-0.4, w+1.1); ax.set_ylim(-0.7, h+0.4)
+            ax.set_title(f'مستطيل  |  S={w*h}  |  P={2*(w+h)}', fontsize=10)
 
-    elif shape == 'triangle':
-        a = float(params.get('a', 5)); h = float(params.get('h', 4)); b_side = float(params.get('b', 4.5))
-        pts = np.array([[0,0],[a,0],[a/2,h],[0,0]])
-        ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
-        ax.plot([a/2, a/2], [0, h], color=C_DIM1, lw=1.5, ls='--')
-        ax.text(a/2, -0.3, f'a = {a}', ha='center', fontsize=11, color=C_DIM1, fontweight='bold')
-        ax.text(a/2+0.2, h/2, f'h = {h}', ha='left', fontsize=10, color=C_DIM2)
-        ax.set_xlim(-0.5, a+0.5); ax.set_ylim(-0.5, h+0.4)
-        ax.set_title(f'مثلث  |  S = {0.5*a*h:.3f}  |  a = {a}  h = {h}', fontsize=11)
+        elif shape == 'triangle':
+            a = float(params.get('a', 5)); h = float(params.get('h', 4))
+            pts = np.array([[0,0],[a,0],[a/2,h],[0,0]])
+            ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
+            ax.plot([a/2, a/2], [0, h], color=C_D1, lw=1.5, ls='--')
+            ax.text(a/2, -0.3, f'a={a}', ha='center', fontsize=11, color=C_D1, fontweight='bold')
+            ax.text(a/2+0.2, h/2, f'h={h}', ha='left', fontsize=10, color=C_D2)
+            ax.set_xlim(-0.5, a+0.5); ax.set_ylim(-0.5, h+0.4)
+            ax.set_title(f'مثلث  |  S={0.5*a*h:.3f}', fontsize=10)
 
-    elif shape == 'right_triangle':
-        a = float(params.get('a', 3)); b = float(params.get('b', 4))
-        hyp = np.sqrt(a**2 + b**2)
-        pts = np.array([[0,0],[a,0],[0,b],[0,0]])
-        ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
-        sq = 0.28
-        ax.plot([sq, sq, 0], [0, sq, sq], color=C_EDGE, lw=1.5)
-        ax.annotate('', xy=(a,-0.3), xytext=(0,-0.3),
-                    arrowprops=dict(arrowstyle='<->', color=C_DIM1, lw=1.5))
-        ax.text(a/2, -0.55, f'{a}', ha='center', fontsize=12, color=C_DIM1, fontweight='bold')
-        ax.annotate('', xy=(-0.35, b), xytext=(-0.35, 0),
-                    arrowprops=dict(arrowstyle='<->', color=C_DIM2, lw=1.5))
-        ax.text(-0.6, b/2, f'{b}', ha='right', fontsize=12, color=C_DIM2, fontweight='bold', va='center')
-        ax.text(a/2+0.2, b/2, f'c = {hyp:.3f}', fontsize=10, color=C_DIM3,
-                rotation=-np.degrees(np.arctan2(b, a)))
-        ax.set_xlim(-0.9, a+0.5); ax.set_ylim(-0.7, b+0.4)
-        ax.set_title(f'مثلث قائم  |  وتر = {hyp:.3f}  |  S = {0.5*a*b:.3f}', fontsize=11)
+        elif shape == 'right_triangle':
+            a = float(params.get('a', 3)); b = float(params.get('b', 4))
+            hyp = np.sqrt(a**2 + b**2)
+            pts = np.array([[0,0],[a,0],[0,b],[0,0]])
+            ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
+            sq = 0.28
+            ax.plot([sq,sq,0], [0,sq,sq], color=C_EDGE, lw=1.5)
+            ax.annotate('', xy=(a,-0.3), xytext=(0,-0.3),
+                        arrowprops=dict(arrowstyle='<->', color=C_D1, lw=1.5))
+            ax.text(a/2, -0.55, f'{a}', ha='center', fontsize=12, color=C_D1, fontweight='bold')
+            ax.annotate('', xy=(-0.35,b), xytext=(-0.35,0),
+                        arrowprops=dict(arrowstyle='<->', color=C_D2, lw=1.5))
+            ax.text(-0.6, b/2, f'{b}', ha='right', fontsize=12, color=C_D2, fontweight='bold', va='center')
+            ax.text(a/2+0.2, b/2, f'c={hyp:.3f}', fontsize=9, color=C_D3,
+                    rotation=-float(np.degrees(np.arctan2(b, a))))
+            ax.set_xlim(-0.9, a+0.5); ax.set_ylim(-0.7, b+0.4)
+            ax.set_title(f'مثلث قائم  |  وتر={hyp:.3f}  |  S={0.5*a*b:.3f}', fontsize=10)
 
-    elif shape == 'parallelogram':
-        b = float(params.get('b', 6)); h = float(params.get('h', 3)); sk = float(params.get('skew', 1.5))
-        pts = np.array([[0,0],[b,0],[b+sk,h],[sk,h],[0,0]])
-        ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
-        ax.plot([sk, sk], [0, h], color=C_DIM1, lw=1.5, ls='--')
-        ax.text(b/2+sk/2, -0.3, f'b = {b}', ha='center', fontsize=11, color=C_DIM1, fontweight='bold')
-        ax.text(sk+0.15, h/2, f'h = {h}', ha='left', fontsize=11, color=C_DIM2, fontweight='bold', va='center')
-        ax.set_xlim(-0.5, b+sk+0.5); ax.set_ylim(-0.5, h+0.4)
-        ax.set_title(f'متوازي أضلاع  |  S = {b*h}  |  b = {b}  h = {h}', fontsize=11)
+        elif shape == 'parallelogram':
+            b = float(params.get('b', 6)); h = float(params.get('h', 3)); sk = float(params.get('skew', 1.5))
+            pts = np.array([[0,0],[b,0],[b+sk,h],[sk,h],[0,0]])
+            ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
+            ax.plot([sk,sk], [0,h], color=C_D1, lw=1.5, ls='--')
+            ax.text(b/2+sk/2, -0.3, f'b={b}', ha='center', fontsize=11, color=C_D1, fontweight='bold')
+            ax.text(sk+0.15, h/2, f'h={h}', ha='left', fontsize=11, color=C_D2, fontweight='bold', va='center')
+            ax.set_xlim(-0.5, b+sk+0.5); ax.set_ylim(-0.5, h+0.4)
+            ax.set_title(f'متوازي أضلاع  |  S={b*h}', fontsize=10)
 
-    elif shape == 'trapezoid':
-        a = float(params.get('a', 6)); b = float(params.get('b', 3)); h = float(params.get('h', 3))
-        off = (a - b) / 2
-        pts = np.array([[0,0],[a,0],[a-off,h],[off,h],[0,0]])
-        ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
-        ax.plot([off, off], [0, h], color=C_DIM1, lw=1.5, ls='--')
-        ax.text(a/2, -0.3, f'a = {a}', ha='center', fontsize=11, color=C_DIM1, fontweight='bold')
-        ax.text(a/2, h+0.15, f'b = {b}', ha='center', fontsize=11, color=C_DIM2, fontweight='bold')
-        ax.text(off-0.2, h/2, f'h = {h}', ha='right', fontsize=11, color=C_DIM3, fontweight='bold', va='center')
-        ax.set_xlim(-0.5, a+0.5); ax.set_ylim(-0.5, h+0.5)
-        ax.set_title(f'شبه منحرف  |  S = {0.5*(a+b)*h:.3f}  |  a={a}  b={b}  h={h}', fontsize=11)
+        elif shape == 'trapezoid':
+            a = float(params.get('a', 6)); b = float(params.get('b', 3)); h = float(params.get('h', 3))
+            off = (a-b)/2
+            pts = np.array([[0,0],[a,0],[a-off,h],[off,h],[0,0]])
+            ax.fill(pts[:,0], pts[:,1], fc=C_FILL, ec=C_EDGE, lw=2.5)
+            ax.plot([off,off], [0,h], color=C_D1, lw=1.5, ls='--')
+            ax.text(a/2, -0.3, f'a={a}', ha='center', fontsize=11, color=C_D1, fontweight='bold')
+            ax.text(a/2, h+0.18, f'b={b}', ha='center', fontsize=11, color=C_D2, fontweight='bold')
+            ax.text(off-0.2, h/2, f'h={h}', ha='right', fontsize=11, color=C_D3, fontweight='bold', va='center')
+            ax.set_xlim(-0.5, a+0.5); ax.set_ylim(-0.5, h+0.5)
+            ax.set_title(f'شبه منحرف  |  S={0.5*(a+b)*h:.3f}', fontsize=10)
 
-    ax.grid(True, alpha=0.25, color='#aaaaaa', ls='--')
-    return _fig_to_bytes(fig)
+        ax.grid(True, alpha=0.25, color='#aaaaaa', ls='--')
+        return _fig_to_bytes(fig)
+    except Exception:
+        return b""
 
 
 def generate_function_plot(expr_str: str, x_range=(-10, 10), label: str = "") -> bytes:
-    """Plot a mathematical function f(x) and return PNG bytes."""
-    x = np.linspace(x_range[0], x_range[1], 600)
-    expr_clean = expr_str.replace('^', '**').replace('×', '*')
+    """Plot f(x) — lazy import, safe on Streamlit Cloud."""
+    plt, _, mpl_ok = _get_mpl()
+    np, np_ok = _get_np()
+    if not mpl_ok or not np_ok:
+        return b""
     try:
+        x = np.linspace(x_range[0], x_range[1], 600)
+        expr_clean = expr_str.replace('^', '**').replace('×', '*')
         y = _safe_eval_expr(expr_clean, x)
         y = np.where(np.abs(y) > 1e5, np.nan, y.astype(float))
+        fig, ax = plt.subplots(figsize=(8, 4.5), facecolor='#f8fff9')
+        ax.set_facecolor('#f8fff9')
+        ax.axhline(0, color='#888', lw=0.9, zorder=1)
+        ax.axvline(0, color='#888', lw=0.9, zorder=1)
+        ax.plot(x, y, color='#145a32', lw=2.5, zorder=2,
+                label=label or f'f(x)={expr_str}')
+        ax.grid(True, alpha=0.3, ls='--')
+        ax.legend(fontsize=11)
+        ax.set_title(f'f(x) = {expr_str}', fontsize=13)
+        ax.set_xlabel('x', fontsize=11); ax.set_ylabel('f(x)', fontsize=11)
+        return _fig_to_bytes(fig)
     except Exception:
         return b""
-    fig, ax = plt.subplots(figsize=(8, 4.5), facecolor='#f8fff9')
-    ax.set_facecolor('#f8fff9')
-    ax.axhline(0, color='#888', lw=0.9, zorder=1)
-    ax.axvline(0, color='#888', lw=0.9, zorder=1)
-    ax.plot(x, y, color='#145a32', lw=2.5, zorder=2,
-            label=label or f'f(x) = {expr_str}')
-    ax.grid(True, alpha=0.3, ls='--')
-    ax.legend(fontsize=11)
-    ax.set_title(f'f(x) = {expr_str}', fontsize=13)
-    ax.set_xlabel('x', fontsize=11); ax.set_ylabel('f(x)', fontsize=11)
-    return _fig_to_bytes(fig)
 
 
 def auto_generate_plots(content: str, subject: str) -> list:
     """
-    ENHANCED v5.1: Returns list of (type, data) tuples.
-    type = 'plotly'  → data is a Plotly Figure
-    type = 'image'   → data is PNG bytes (Matplotlib)
-    Auto-detects functions and geometric shapes from generated text.
+    Returns list of ('plotly'|'image', data) tuples.
+    Lazy-imports numpy/matplotlib — never crashes on missing packages.
     """
     plots = []
+    np, np_ok = _get_np()
     subject_lower = (subject or "").lower()
     is_math = any(k in subject_lower for k in [
         "رياضيات", "math", "mathematics", "فيزياء", "physics",
@@ -992,9 +1025,10 @@ def auto_generate_plots(content: str, subject: str) -> list:
     if not is_math:
         return plots
 
-    # ── Plotly: explicit f(x)=... patterns ──
-    func_pattern = r'f\s*\(\s*x\s*\)\s*=\s*([\d\.\w\s\^\+\-\*\/\(\)]+)'
+    # ── Plotly: explicit f(x)=... patterns (works without numpy) ──
     for expr in re.findall(r'f\s*\(\s*x\s*\)\s*=\s*([\d\.\w\s\^\+\-\*\/\(\)]+)', content)[:3]:
+        if not np_ok:
+            break
         expr_clean = expr.strip().replace('^', '**')
         try:
             x_v = np.linspace(-10, 10, 300)
@@ -1012,7 +1046,7 @@ def auto_generate_plots(content: str, subject: str) -> list:
         except Exception:
             pass
 
-    # ── Statistical scatter from (x, y) pairs ──
+    # ── Statistical scatter ──
     numbers = re.findall(r'(\d+)\s*,\s*(\d+)', content)
     if len(numbers) >= 3:
         df = pd.DataFrame(numbers[:20], columns=["X", "Y"]).astype(float)
@@ -1022,19 +1056,15 @@ def auto_generate_plots(content: str, subject: str) -> list:
         plots.append(("plotly", fig2))
 
     # ── Matplotlib geometry auto-detection ──
+    if not np_ok:
+        return plots
     geo_map = {
-        "دائرة":           "circle",
-        "circle":          "circle",
-        "مثلث قائم":       "right_triangle",
-        "right triangle":  "right_triangle",
-        "مثلث":            "triangle",
-        "triangle":        "triangle",
-        "مستطيل":          "rectangle",
-        "rectangle":       "rectangle",
-        "متوازي أضلاع":    "parallelogram",
-        "parallelogram":   "parallelogram",
-        "شبه منحرف":       "trapezoid",
-        "trapezoid":       "trapezoid",
+        "دائرة": "circle", "circle": "circle",
+        "مثلث قائم": "right_triangle", "right triangle": "right_triangle",
+        "مثلث": "triangle", "triangle": "triangle",
+        "مستطيل": "rectangle", "rectangle": "rectangle",
+        "متوازي أضلاع": "parallelogram", "parallelogram": "parallelogram",
+        "شبه منحرف": "trapezoid", "trapezoid": "trapezoid",
     }
     content_lower = content.lower()
     drawn = set()
@@ -1042,7 +1072,6 @@ def auto_generate_plots(content: str, subject: str) -> list:
         if kw not in content_lower or shape in drawn:
             continue
         hit = content_lower.find(kw)
-        nums = re.findall(r'(\d+(?:\.\d+)?)', content[hit:hit+100])
         nums = re.findall(r'(\d+(?:\.\d+)?)', content[hit:hit+100])
         p = {}
         if shape == 'circle' and nums:
@@ -1052,11 +1081,9 @@ def auto_generate_plots(content: str, subject: str) -> list:
             if len(nums) >= 3: p['h'] = nums[2]
         elif shape == 'rectangle' and len(nums) >= 2:
             p['w'] = nums[0]; p['h'] = nums[1]
-        elif shape == 'trapezoid' and len(nums) >= 2:
+        elif shape in ('trapezoid', 'parallelogram') and len(nums) >= 2:
             p['a'] = nums[0]; p['b'] = nums[1]
             if len(nums) >= 3: p['h'] = nums[2]
-        elif shape == 'parallelogram' and len(nums) >= 2:
-            p['b'] = nums[0]; p['h'] = nums[1]
         try:
             img = generate_geometry_figure(shape, p)
             if img:
@@ -2947,6 +2974,10 @@ with tab_ex:
 # GEOMETRY VISUALIZER — appended to Exercise Tab
 # ══════════════════════════════════════════════════
     st.markdown("---")
+    if not (_MPL_AVAILABLE and _NP_AVAILABLE):
+        st.info("⚠️ أضف `matplotlib>=3.8.0` و `numpy>=1.26.0` إلى requirements.txt لتفعيل الأشكال الهندسية.")
+    else:
+        pass  # geometry widget loads below
     st.markdown("### 📐 مُوَلِّد الأشكال الهندسية التفاعلي")
     st.markdown(
         '<div class="template-box">🔷 ارسم أي شكل هندسي وأحسب مساحته ومحيطه تلقائياً</div>',
@@ -2971,20 +3002,21 @@ with tab_ex:
         elif geo_shape == "مثلث قائم":
             _gp['a'] = st.number_input("a", 0.5, 50.0, 3.0, key="grta")
             _gp['b'] = st.number_input("b", 0.5, 50.0, 4.0, key="grtb")
-            _hyp = np.sqrt(_gp['a']**2 + _gp['b']**2)
+            import math as _wmath
+            _hyp = _wmath.sqrt(_gp['a']**2 + _gp['b']**2)
             _ga = 0.5*_gp['a']*_gp['b']; _gpe = _gp['a']+_gp['b']+_hyp
             st.info(f"الوتر = {_hyp:.4f}")
         elif geo_shape == "متوازي أضلاع":
             _gp['b'] = st.number_input("b", 0.5, 50.0, 6.0, key="gpb")
             _gp['h'] = st.number_input("h", 0.5, 50.0, 3.0, key="gph")
             _gp['skew'] = st.number_input("ميل", 0.1, 10.0, 1.5, key="gsk")
-            _ga = _gp['b']*_gp['h']; _gpe = 2*(_gp['b'] + np.sqrt(_gp['h']**2+_gp['skew']**2))
+            _ga = _gp['b']*_gp['h']; _gpe = 2*(_gp['b'] + __import__("math").sqrt(_gp['h']**2+_gp['skew']**2))
         elif geo_shape == "شبه منحرف":
             _gp['a'] = st.number_input("a", 0.5, 50.0, 6.0, key="gtra")
             _gp['b'] = st.number_input("b", 0.5, 50.0, 3.0, key="gtrb")
             _gp['h'] = st.number_input("h", 0.5, 50.0, 3.0, key="gtrh")
             _ga = 0.5*(_gp['a']+_gp['b'])*_gp['h']
-            _gpe = _gp['a']+_gp['b']+2*np.sqrt(_gp['h']**2+((_gp['a']-_gp['b'])/2)**2)
+            import math as _wmath3; _gpe = _gp['a']+_gp['b']+2*_wmath3.sqrt(_gp['h']**2+((_gp['a']-_gp['b'])/2)**2)
         else:
             _ga = _gpe = 0.0
         _shape_code = {"دائرة":"circle","مستطيل":"rectangle","مثلث":"triangle",
