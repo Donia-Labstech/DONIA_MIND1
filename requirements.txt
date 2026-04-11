@@ -18,3 +18,6 @@ numpy>=1.24.0
 requests>=2.31.0
 arcee-py>=0.2.0
 streamlit-mic-recorder>=0.0.4
+groq>=0.9.0
+matplotlib>=3.8.0
+arcee-ai>=1.0.0
