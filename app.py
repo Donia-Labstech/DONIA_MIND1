@@ -235,6 +235,20 @@ class ArabicFPDF(FPDF):
             except Exception:
                 continue
 
+        # ── PRIORITY 2.5: Noto Naskh Arabic (most reliable Arabic Unicode font) ─
+        _noto_ar_path = "/tmp/donia_fonts/NotoNaskhArabic-Regular.ttf"
+        _noto_ar_url  = "https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Regular.ttf"
+        _noto_ar_url2 = "https://github.com/notofonts/arabic/releases/download/NotoNaskhArabic-v2.013/NotoNaskhArabic-Regular.ttf"
+        if _download_font(_noto_ar_url, _noto_ar_path, 80_000) or            _download_font(_noto_ar_url2, _noto_ar_path, 80_000):
+            try:
+                self.add_font("NotoArabic", "", _noto_ar_path)
+                self.set_font("NotoArabic", size=12)
+                self._active_font = "NotoArabic"
+                self.has_unicode = True
+                return
+            except Exception:
+                pass
+
         # ── PRIORITY 3: GNU FreeSans (system, HAS full Arabic support) ─
         # FreeSans is 1.8 MB and covers Arabic U+0600–U+06FF
         # NOTE: DejaVuSans (759 KB) does NOT have Arabic → never use it for Arabic PDF
@@ -291,7 +305,7 @@ class ArabicFPDF(FPDF):
         return re.sub(r'[^\x20-\x7E]', '?', text)
 
     def _font(self, bold: bool = False) -> str:
-        if self._active_font in ("Amiri", "FreeSans", "FreeSerif", "SysFallback", "DejaVu"):
+        if self._active_font in ("Amiri", "FreeSans", "FreeSerif", "SysFallback", "DejaVu", "NotoArabic"):
             return self._active_font
         return "Helvetica"
 
@@ -323,6 +337,22 @@ class ArabicFPDF(FPDF):
                 self.cell(w, h, ascii_txt, border=border, ln=ln, align=align, fill=fill)
             except Exception:
                 pass
+
+
+def _download_font(url: str, dest: str, min_size: int = 50_000) -> bool:
+    """Download a font file to dest. Returns True on success."""
+    if os.path.exists(dest) and os.path.getsize(dest) >= min_size:
+        return True
+    try:
+        r = requests.get(url, timeout=20, headers={"User-Agent": "DONIA-MIND/5.0"})
+        if r.status_code == 200 and len(r.content) >= min_size:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(r.content)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def ensure_font_files():
@@ -382,7 +412,21 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
     pdf.set_y(-15)
     pdf.set_sized_font(8)
     pdf.safe_cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR) if rtl else COPYRIGHT_FOOTER_AR, align='C')
-    return bytes(pdf.output())
+    try:
+        return bytes(pdf.output())
+    except Exception as _pdf_err:
+        # If unicode encoding fails during output, regenerate with safe ASCII
+        try:
+            from fpdf import FPDF as _FPDF
+            _pdf_fb = _FPDF()
+            _pdf_fb.set_font("Helvetica", size=10)
+            _pdf_fb.add_page()
+            _pdf_fb.cell(0, 8, "DONIA MIND v5.0 - PDF Generation", ln=True, align='C')
+            _pdf_fb.cell(0, 6, f"Error: {str(_pdf_err)[:80]}", ln=True)
+            _pdf_fb.cell(0, 6, "Please ensure Amiri/FreeSans font is installed.", ln=True)
+            return bytes(_pdf_fb.output())
+        except Exception:
+            return b""  # absolute last resort
 
 def generate_exam_pdf(exam_data: dict) -> bytes:
     ensure_font_files()
@@ -419,7 +463,21 @@ def generate_exam_pdf(exam_data: dict) -> bytes:
     pdf.set_y(-15)
     pdf.set_sized_font(8)
     pdf.safe_cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR, rtl), align='C')
-    return bytes(pdf.output())
+    try:
+        return bytes(pdf.output())
+    except Exception as _pdf_err:
+        # If unicode encoding fails during output, regenerate with safe ASCII
+        try:
+            from fpdf import FPDF as _FPDF
+            _pdf_fb = _FPDF()
+            _pdf_fb.set_font("Helvetica", size=10)
+            _pdf_fb.add_page()
+            _pdf_fb.cell(0, 8, "DONIA MIND v5.0 - PDF Generation", ln=True, align='C')
+            _pdf_fb.cell(0, 6, f"Error: {str(_pdf_err)[:80]}", ln=True)
+            _pdf_fb.cell(0, 6, "Please ensure Amiri/FreeSans font is installed.", ln=True)
+            return bytes(_pdf_fb.output())
+        except Exception:
+            return b""  # absolute last resort
 def generate_report_pdf(report_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
@@ -451,7 +509,21 @@ def generate_report_pdf(report_data: dict) -> bytes:
     pdf.set_y(-15)
     pdf.set_sized_font(8)
     pdf.safe_cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR), align='C')
-    return bytes(pdf.output())
+    try:
+        return bytes(pdf.output())
+    except Exception as _pdf_err:
+        # If unicode encoding fails during output, regenerate with safe ASCII
+        try:
+            from fpdf import FPDF as _FPDF
+            _pdf_fb = _FPDF()
+            _pdf_fb.set_font("Helvetica", size=10)
+            _pdf_fb.add_page()
+            _pdf_fb.cell(0, 8, "DONIA MIND v5.0 - PDF Generation", ln=True, align='C')
+            _pdf_fb.cell(0, 6, f"Error: {str(_pdf_err)[:80]}", ln=True)
+            _pdf_fb.cell(0, 6, "Please ensure Amiri/FreeSans font is installed.", ln=True)
+            return bytes(_pdf_fb.output())
+        except Exception:
+            return b""  # absolute last resort
 def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     ensure_font_files()
     pdf = ArabicFPDF()
@@ -498,7 +570,21 @@ def generate_lesson_plan_pdf(plan_data: dict) -> bytes:
     pdf.set_y(-15)
     pdf.set_sized_font(8)
     pdf.safe_cell(0, 10, pdf._safe_text(COPYRIGHT_FOOTER_AR), align='C')
-    return bytes(pdf.output())
+    try:
+        return bytes(pdf.output())
+    except Exception as _pdf_err:
+        # If unicode encoding fails during output, regenerate with safe ASCII
+        try:
+            from fpdf import FPDF as _FPDF
+            _pdf_fb = _FPDF()
+            _pdf_fb.set_font("Helvetica", size=10)
+            _pdf_fb.add_page()
+            _pdf_fb.cell(0, 8, "DONIA MIND v5.0 - PDF Generation", ln=True, align='C')
+            _pdf_fb.cell(0, 6, f"Error: {str(_pdf_err)[:80]}", ln=True)
+            _pdf_fb.cell(0, 6, "Please ensure Amiri/FreeSans font is installed.", ln=True)
+            return bytes(_pdf_fb.output())
+        except Exception:
+            return b""  # absolute last resort
 
 
 # ========== DOCX generators ==========
@@ -1189,25 +1275,47 @@ def analyze_template_structure(raw_text: str, template_type: str) -> dict:
 النص المستخرج من القالب ({template_type}):
 {raw_text[:3000]}
 
-قم بتحليل الهيكل العام وأخرج بصيغة JSON:
+قم بتحليل الهيكل العام وأخرج بصيغة JSON فقط بدون أي نص إضافي:
 {{
     "type": "lesson_plan" or "exam" or "exercise",
+    "confidence": 0.0-1.0,
+    "needs_review": true/false,
     "sections": ["قائمة", "العناوين", "الرئيسية"],
     "metadata": {{
         "has_table": true/false,
         "has_rtl": true,
-        "has_equations": true/false
+        "has_equations": true/false,
+        "language": "Arabic" or "French" or "English" or "Mixed"
     }},
     "key_phrases": ["عبارات", "مهمة"],
     "suggested_prompt_template": "نموذج موجه يمكن استخدامه للتوليد وفق هذا القالب"
-}}"""
+}}
+
+قواعد الثقة: confidence=1.0 إذا كان الهيكل واضحاً جداً، confidence<0.7 يعني needs_review=true."""
     try:
         llm = get_llm(DEFAULT_GROQ_MODEL, GROQ_API_KEY)
         response = call_llm(llm, prompt)
+        # Strip markdown fences if present
+        _clean = response.strip()
+        if _clean.startswith("```"):
+            _clean = re.sub(r'^```[a-zA-Z]*', '', _clean.split('\n',1)[-1] if '\n' in _clean else _clean).rstrip('`').strip()
         try:
-            return json.loads(response)
-        except:
-            return {"type": "unknown", "sections": [], "metadata": {}, "key_phrases": [], "suggested_prompt_template": raw_text[:500]}
+            parsed = json.loads(_clean)
+            # Enforce confidence check
+            conf = float(parsed.get("confidence", 1.0))
+            parsed["confidence"] = conf
+            parsed["needs_review"] = conf < 0.7 or parsed.get("type", "unknown") == "unknown"
+            return parsed
+        except Exception:
+            return {
+                "type": "unknown",
+                "confidence": 0.0,
+                "needs_review": True,
+                "sections": [],
+                "metadata": {"has_rtl": True, "language": "Arabic"},
+                "key_phrases": [],
+                "suggested_prompt_template": raw_text[:500]
+            }
     except Exception as e:
         return {"error": str(e)}
 
@@ -1502,10 +1610,52 @@ def llm_output_language_clause(subject: str) -> str:
     rtl, lang = get_pdf_mode_for_subject(subject)
     if rtl:
         return "قاعدة إلزامية: اكتب كل المحتوى (العناوين، الأسئلة، الشروح) بالعربية الفصحى الواضحة."
+    elif lang == "English":
+        return ("Mandatory: produce the ENTIRE output in English only. "
+                "Use clear, simple English suitable for Algerian primary/middle school students. "
+                "Do not mix Arabic or French into the instructional content.")
     else:
         return f"Mandatory: produce the ENTIRE output in {lang}. Do not use Arabic."
 
+
+def get_subject_css_direction(subject: str) -> str:
+    """Return CSS direction string for use in HTML elements based on subject language."""
+    rtl, _ = get_pdf_mode_for_subject(subject)
+    return "rtl" if rtl else "ltr"
+
+
+
 # Curriculum data
+
+def render_content_rtl_aware(text, subject):
+    """Render AI-generated content with direction based on subject language."""
+    direction = get_subject_css_direction(subject)
+    text_align = "right" if direction == "rtl" else "left"
+    ff_rtl = "'Cairo','Tajawal',sans-serif"
+    ff_ltr = "'Montserrat','Segoe UI',sans-serif"
+    font_family = ff_rtl if direction == "rtl" else ff_ltr
+    clean = clean_latex(text)
+    # Split on LaTeX: $$...$$ or $...$
+    import re as _re2
+    LATEX_PAT = _re2.compile(r'(\$\$[\s\S]+?\$\$|\$[^\$\n]+?\$)')
+    parts = LATEX_PAT.split(clean)
+    for part in parts:
+        if part.startswith("$$") and part.endswith("$$"):
+            st.latex(part[2:-2].strip())
+        elif part.startswith("$") and part.endswith("$"):
+            st.latex(part[1:-1].strip())
+        elif part.strip():
+            css = (
+                "direction:" + direction + ";"
+                "text-align:" + text_align + ";"
+                "font-family:" + font_family + ";"
+                "color:#111111;line-height:2;"
+            )
+            st.markdown(
+                '<div style="' + css + '">' + part + '</div>',
+                unsafe_allow_html=True)
+
+
 CURRICULUM = {
     "الطور الابتدائي": {
         "grades": ["السنة الأولى", "السنة الثانية", "السنة الثالثة",
@@ -1517,12 +1667,15 @@ CURRICULUM = {
                               "التربية المدنية", "التربية التشكيلية", "التربية البدنية"],
             "السنة الثالثة": ["اللغة العربية", "الرياضيات", "التربية الإسلامية",
                               "التربية المدنية", "اللغة الفرنسية",
+                              "اللغة الإنجليزية",
                               "التربية العلمية والتكنولوجية", "التاريخ والجغرافيا"],
             "السنة الرابعة": ["اللغة العربية", "الرياضيات", "التربية الإسلامية",
                               "التربية المدنية", "اللغة الفرنسية",
+                              "اللغة الإنجليزية",
                               "التربية العلمية والتكنولوجية", "التاريخ والجغرافيا"],
             "السنة الخامسة": ["اللغة العربية", "الرياضيات", "التربية الإسلامية",
                               "التربية المدنية", "اللغة الفرنسية",
+                              "اللغة الإنجليزية",
                               "التربية العلمية والتكنولوجية", "التاريخ والجغرافيا"],
         },
         "branches": None,
@@ -2016,6 +2169,65 @@ section[data-testid="stSidebar"]{
 @media (max-width: 768px) {
     section[data-testid="stSidebar"] { width: 85% !important; }
 }
+
+/* ── Responsive Flexbox improvements ── */
+.donia-download-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: flex-start;
+    align-items: center;
+}
+.donia-download-grid > * { flex: 1 1 120px; min-width: 100px; }
+
+/* Sidebar educational level & institution info */
+section[data-testid="stSidebar"] .stSelectbox,
+section[data-testid="stSidebar"] .stTextInput {
+    width: 100% !important;
+}
+section[data-testid="stSidebar"] [data-testid="column"] {
+    min-width: 0 !important;
+    flex: 1 1 80px !important;
+}
+
+/* Result boxes: ensure LTR content switches direction */
+.result-box-ltr {
+    background: #f9f9f9;
+    border: 1px solid rgba(30,132,73,.3);
+    border-radius: 16px;
+    padding: 1.45rem;
+    direction: ltr;
+    text-align: left;
+    color: #111;
+    line-height: 2;
+    margin: .85rem 0;
+    font-family: 'Montserrat', 'Segoe UI', sans-serif;
+}
+
+/* 4-column download matrix — collapses to 2 on mobile */
+@media (max-width: 640px) {
+    [data-testid="column"] { min-width: 45% !important; }
+}
+@media (max-width: 400px) {
+    [data-testid="column"] { min-width: 100% !important; }
+}
+
+/* RAG preview text area */
+.rag-preview-box {
+    direction: rtl;
+    text-align: right;
+    font-family: 'Cairo', 'Amiri', monospace;
+    font-size: 0.9rem;
+    line-height: 1.85;
+    background: #f4fbf6;
+    border-radius: 10px;
+    padding: 1rem;
+    color: #111;
+    border: 1px solid #27ae60;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+}
 section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
 
 .stTabs [data-baseweb="tab"]{direction:rtl;font-size:.9rem;font-weight:700;color:#145a32}
@@ -2358,7 +2570,7 @@ with tab_plan:
                             st.info(f"📌 ملاحظات الناقد: {critic_report['remarks']}")
                     else:
                         st.warning("⚠️ لم يتم التحقق من المحتوى بواسطة الناقد.")
-                    render_with_latex(plan_text)
+                    render_content_rtl_aware(plan_text, subject)
 
                     plots = auto_generate_plots(plan_text, subject)
                     for _ptype, _pdata in plots:
@@ -2542,7 +2754,7 @@ with tab_exam:
                     st.markdown(
                         f'<div class="feature-card"><h4>📄 {subject} | {grade}{branch_txt} | {exam_semester} | ⏱️ {exam_duration}</h4></div>',
                         unsafe_allow_html=True)
-                    render_with_latex(exam_content)
+                    render_content_rtl_aware(exam_content, subject)
                     plots = auto_generate_plots(exam_content, subject)
                     for _ptype, _pdata in plots:
                         if _ptype == "plotly":
@@ -2969,7 +3181,7 @@ with tab_ex:
                 try:
                     llm = get_llm(DEFAULT_GROQ_MODEL, GROQ_API_KEY)
                     res_text = call_llm(llm, prompt)
-                    render_with_latex(res_text)
+                    render_content_rtl_aware(res_text, subject)
                     plots = auto_generate_plots(res_text, subject)
                     for _ptype, _pdata in plots:
                         if _ptype == "plotly":
@@ -3322,7 +3534,20 @@ with tab_template:
                             save_template(template_name, template_type, raw_text, structure)
                             st.success(f"✅ تم حفظ القالب '{template_name}' بنجاح!")
                             # Show structure fields in RTL-safe way
-                            st.markdown(f"**النوع:** `{structure.get('type','')}`")
+                            import html as _html2
+                            _conf = float(structure.get('confidence', 1.0))
+                            _needs_review = structure.get('needs_review', False)
+                            # Confidence badge
+                            _badge_color = "#27ae60" if _conf >= 0.7 else "#c0392b"
+                            _badge_label = f"ثقة: {_conf:.0%}"
+                            st.markdown(
+                                f'''<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem;">
+                                <span style="background:{_badge_color};color:#fff;padding:.2rem .7rem;border-radius:20px;font-size:.85rem;font-weight:700;">{_badge_label}</span>
+                                <span style="background:#f0f0f0;padding:.2rem .7rem;border-radius:20px;font-size:.85rem;">النوع: {structure.get('type','غير محدد')}</span>
+                                <span style="background:#f0f0f0;padding:.2rem .7rem;border-radius:20px;font-size:.85rem;">اللغة: {structure.get('metadata',{}).get('language','عربي')}</span>
+                                </div>''', unsafe_allow_html=True)
+                            if _needs_review:
+                                st.warning("⚠️ **مراجعة يدوية مطلوبة** — الثقة أقل من 70%. يُرجى التحقق من صحة الهيكل المستخرج قبل الاستخدام.")
                             if structure.get('sections'):
                                 st.markdown(f"**الأقسام:** {', '.join(str(s) for s in structure['sections'])}")
                             if structure.get('key_phrases'):
@@ -3330,12 +3555,9 @@ with tab_template:
                             prompt_tpl = structure.get('suggested_prompt_template','')
                             if prompt_tpl:
                                 st.markdown("**نموذج الموجّه المقترح:**")
-                                import html as _html2
                                 _esc = _html2.escape(str(prompt_tpl)).replace("\n","<br>")
                                 st.markdown(
-                                    f'''<div style="direction:rtl;text-align:right;font-family:'Cairo',sans-serif;
-                                    font-size:0.88rem;line-height:1.8;background:#f4fbf6;border-radius:8px;
-                                    padding:0.85rem;color:#145a32;border:1px dashed #27ae60;white-space:pre-wrap;">
+                                    f'''<div class="rag-preview-box" style="direction:rtl;text-align:right;">
                                     {_esc}</div>''',
                                     unsafe_allow_html=True)
                         else:
