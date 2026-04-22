@@ -1,8 +1,8 @@
 """
-DONIA MIND 5 — المعلم الذكي (DONIA SMART TEACHER) — v5.0 MILITARY-GRADE
-═══════════════════════════════════════════════════════════════════════════
-FULLY REPAIRED: call_llm defined, Arcee handshake fixed, PDF fonts working,
-Save-to-RAG implemented, download matrix restored.
+DONIA MIND 6 — المعلم الذكي (DONIA SMART TEACHER) — v6.0
+══════════════════════════════════════════════════════════
+v6.0 UPGRADES: Responsive sidebar (mobile-first), cached health-check,
+enhanced Tavily educational search, dynamic RTL/LTR, English Primary 3-5.
 """
 import streamlit as st
 import os
@@ -75,6 +75,43 @@ except ImportError:
 load_dotenv()
 
 # ═══════════════════════════════════════════════════════════
+# v6.0 — CENTRAL SESSION STATE STORE
+# All generated content is written here and downloads read
+# from the same source, ensuring UI/download consistency.
+# ═══════════════════════════════════════════════════════════
+_V6_STATE_KEYS = [
+    "v6_last_plan",    # last generated lesson plan text
+    "v6_last_exam",    # last generated exam text
+    "v6_last_exercise",# last generated exercise text
+    "v6_last_report",  # last generated report text
+    "v6_plan_meta",    # plan metadata dict
+    "v6_exam_meta",    # exam metadata dict
+    "v6_exercise_meta",# exercise metadata dict
+    "v6_level",        # selected educational level
+    "v6_grade",        # selected grade
+    "v6_branch",       # selected branch (if any)
+    "v6_subject",      # selected subject
+]
+
+
+def _init_v6_state():
+    """Initialize all v6 session state keys if not present."""
+    for k in _V6_STATE_KEYS:
+        if k not in st.session_state:
+            st.session_state[k] = None
+
+
+def _store(key: str, value):
+    """Write a value to v6 session state."""
+    st.session_state[key] = value
+
+
+def _load(key: str, default=None):
+    """Read a value from v6 session state."""
+    return st.session_state.get(key, default)
+
+
+# ═══════════════════════════════════════════════════════════
 # FIX 9047: Unified LLM caller - DEFINED AT TOP LEVEL
 # ═══════════════════════════════════════════════════════════
 def call_llm(llm, prompt: str) -> str:
@@ -107,7 +144,7 @@ ARCEE_API_KEY = _get_api_key("ARCEE_API_KEY")
 TAVILY_API_KEY = _get_api_key("TAVILY_API_KEY")
 
 COPYRIGHT_FOOTER_AR = "جميع حقوق الملكية محفوظة حصرياً لمختبر DONIA LABS TECH © 2026"
-WELCOME_MESSAGE_AR = "أهلاً بك أستاذنا القدير في رحاب DONIA MIND v5.0.. معاً نصنع مستقبل التعليم الجزائري بذكاء واحترافية."
+WELCOME_MESSAGE_AR = "أهلاً بك أستاذنا القدير في رحاب DONIA MIND v6.0 🚀 معاً نصنع مستقبل التعليم الجزائري بذكاء واحترافية."
 
 # Social URLs
 SOCIAL_URL_WHATSAPP = os.getenv("DONIA_URL_WHATSAPP", "https://wa.me/213674661737")
@@ -798,6 +835,73 @@ def test_arcee_connection() -> bool:
         except Exception:
             continue
     return False
+
+# ═══════════════════════════════════════════════════════════════
+# v6.0 — CACHED HEALTH CHECK (runs once per session, non-blocking)
+# ═══════════════════════════════════════════════════════════════
+@st.cache_resource(show_spinner=False)
+def _health_check_groq(api_key: str) -> dict:
+    """Non-blocking Groq connectivity check. Cached per session."""
+    if not api_key:
+        return {"ok": False, "latency_ms": None, "model": None, "msg": "API key missing"}
+    try:
+        import time as _t
+        _start = _t.monotonic()
+        llm = ChatGroq(model_name=DEFAULT_GROQ_MODEL, groq_api_key=api_key, temperature=0)
+        llm.invoke("ping")
+        ms = int((_t.monotonic() - _start) * 1000)
+        return {"ok": True, "latency_ms": ms, "model": DEFAULT_GROQ_MODEL, "msg": "متصل"}
+    except Exception as e:
+        return {"ok": False, "latency_ms": None, "model": None, "msg": str(e)[:80]}
+
+
+@st.cache_resource(show_spinner=False)
+def _health_check_arcee(api_key: str) -> dict:
+    """Non-blocking Arcee connectivity check. Cached per session."""
+    if not api_key:
+        return {"ok": False, "latency_ms": None, "msg": "API key missing"}
+    import time as _t
+    # Try SDK first
+    if _ARCEE_AVAILABLE:
+        try:
+            _start = _t.monotonic()
+            client = Arcee(api_key=api_key)
+            if hasattr(client, "generate"):
+                client.generate("ping")
+            elif hasattr(client, "list_retrievers"):
+                client.list_retrievers()
+            ms = int((_t.monotonic() - _start) * 1000)
+            return {"ok": True, "latency_ms": ms, "msg": "متصل (SDK)"}
+        except Exception:
+            pass
+    # HTTP fallback
+    for endpoint in [
+        "https://models.arcee.ai/v1/models",
+        "https://api.arcee.ai/v2/models",
+    ]:
+        try:
+            _start = _t.monotonic()
+            r = requests.get(endpoint,
+                             headers={"Authorization": f"Bearer {api_key}"},
+                             timeout=6)
+            ms = int((_t.monotonic() - _start) * 1000)
+            if r.status_code == 200:
+                return {"ok": True, "latency_ms": ms, "msg": "متصل (HTTP)"}
+            if r.status_code in (401, 403):
+                return {"ok": False, "latency_ms": ms, "msg": f"مفتاح مرفوض ({r.status_code})"}
+        except Exception:
+            continue
+    return {"ok": False, "latency_ms": None, "msg": "تعذر الاتصال"}
+
+
+def get_connection_status() -> dict:
+    """Return cached connection status for both APIs."""
+    return {
+        "groq":  _health_check_groq(GROQ_API_KEY),
+        "arcee": _health_check_arcee(ARCEE_API_KEY),
+    }
+
+
 def call_arcee_generate(prompt: str) -> str:
     if not _ARCEE_AVAILABLE or not ARCEE_API_KEY:
         raise Exception("Arcee not available")
@@ -962,20 +1066,72 @@ def generate_text_excel(content: str, title: str, metadata: dict) -> bytes:
 # ═══════════════════════════════════════════════════════════
 # Web search, scientific plots, template learning
 # ═══════════════════════════════════════════════════════════
-def web_search(query: str, max_results: int = 3) -> str:
+# ─────────────────────────────────────────────────────────────
+# v6.0 — ENHANCED EDUCATIONAL TAVILY SEARCH
+# Prioritizes Algerian MEN / educational / mathonec sources
+# ─────────────────────────────────────────────────────────────
+
+# Trusted Algerian educational domains (whitelist boost)
+_EDU_DOMAINS = [
+    "men.gov.dz", "onefd.edu.dz", "mathonec.com", "ency-education.com",
+    "dzexams.com", "education.gov.dz", "mineduc.dz", "iefp.dz",
+    "learnalgeria.com", "tarbya.net"
+]
+
+def _score_result(res: dict) -> int:
+    """Score a Tavily result — higher = more educational & relevant."""
+    url   = (res.get("url") or "").lower()
+    title = (res.get("title") or "").lower()
+    score = 0
+    for d in _EDU_DOMAINS:
+        if d in url:
+            score += 10
+    if any(kw in title for kw in ["منهاج", "كتاب مدرسي", "وزارة", "برنامج", "تعليم"]):
+        score += 5
+    if any(kw in url for kw in [".edu", "school", "teacher", "education", "cours"]):
+        score += 3
+    score += min(int(res.get("score", 0) * 100), 20)
+    return score
+
+
+def web_search(query: str, max_results: int = 5,
+               educational_filter: bool = True) -> str:
+    """
+    v6.0 Enhanced Tavily search.
+    educational_filter=True boosts Algerian curriculum sources.
+    Returns formatted string with source attribution.
+    """
     if not TAVILY_AVAILABLE or not TAVILY_API_KEY:
         return ""
     try:
         client = TavilyClient(api_key=TAVILY_API_KEY)
-        response = client.search(query, max_results=max_results, include_answer=True)
+        # Use topic="education" for better result relevance
+        raw = client.search(
+            query,
+            max_results=max_results,
+            include_answer=True,
+            include_raw_content=False,
+            search_depth="advanced",
+        )
         results = []
-        if response.get("answer"):
-            results.append(f"إجابة مختصرة: {response['answer']}")
-        for res in response.get("results", []):
-            results.append(f"- {res.get('title', '')}: {res.get('content', '')[:200]}")
-        return "\n".join(results)
+        if raw.get("answer"):
+            results.append(f"📌 **إجابة مباشرة:** {raw['answer']}")
+
+        hits = raw.get("results", [])
+        if educational_filter:
+            hits = sorted(hits, key=_score_result, reverse=True)
+
+        for res in hits[:max_results]:
+            title   = res.get("title", "بدون عنوان")
+            content = (res.get("content") or "")[:250]
+            url     = res.get("url", "")
+            # Tag trusted domains
+            trust_tag = "✅ " if any(d in url for d in _EDU_DOMAINS) else "🔗 "
+            results.append(f"{trust_tag}**{title}**\n{content}\n*المصدر: {url}*")
+
+        return "\n\n".join(results)
     except Exception as e:
-        st.warning(f"فشل البحث: {e}")
+        st.warning(f"فشل البحث التعليمي: {e}")
         return ""
 
 # ═══════════════════════════════════════════════════════════
@@ -2003,8 +2159,19 @@ def generate_assistant_response(query: str) -> str:
         return f"❌ حدث خطأ: {str(e)}"
 
 # ========== PAGE CONFIG & CSS ==========
-st.set_page_config(page_title="DONIA MIND — المعلم الذكي v5.0", page_icon="🎓",
-                   layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="DONIA MIND — المعلم الذكي v6.0",
+    page_icon="🎓",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        "Get Help": "https://t.me/+LxRzVAK12HZmNTQ8",
+        "Report a bug": None,
+        "About": "DONIA MIND v6.0 — منصة المعلم الجزائري الذكي © DONIA LABS TECH 2026",
+    },
+)
+# ── v6.0: Initialise persistent state on every load ──
+_init_v6_state()
 
 st.markdown("""
 <style>
@@ -2166,23 +2333,77 @@ section[data-testid="stSidebar"]{
   background:linear-gradient(180deg,#f4fbf6,#eaf6ee)!important;
   border-left:4px solid #27ae60;
 }
+
+/* ══════════════════════════════════════════════════════════
+   v6.0 — MOBILE-FIRST RESPONSIVE SIDEBAR (完全なし)
+   Target: 320px–2560px screens, touch-friendly controls
+   ══════════════════════════════════════════════════════════ */
+
+/* ── Base sidebar: full-width on mobile, auto on desktop ── */
 @media (max-width: 768px) {
-    section[data-testid="stSidebar"] { width: 85% !important; }
+    section[data-testid="stSidebar"] {
+        width: 100% !important;
+        max-width: 100vw !important;
+    }
+}
+@media (min-width: 769px) {
+    section[data-testid="stSidebar"] {
+        min-width: 280px !important;
+        max-width: 340px !important;
+    }
 }
 
-/* ── Responsive Flexbox improvements ── */
-.donia-download-grid {
+/* ── Connection status cards: flex row, equal width, no overflow ── */
+.v6-conn-row {
     display: flex;
-    flex-wrap: wrap;
     gap: 0.5rem;
-    justify-content: flex-start;
-    align-items: center;
+    flex-wrap: nowrap;
+    justify-content: stretch;
+    margin: 0.4rem 0;
 }
-.donia-download-grid > * { flex: 1 1 120px; min-width: 100px; }
+.v6-conn-card {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0.55rem 0.4rem;
+    border-radius: 14px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.82rem;
+    line-height: 1.4;
+    word-break: break-word;
+    transition: transform 0.15s;
+}
+.v6-conn-card:active { transform: scale(0.97); }
+.v6-conn-ok {
+    background: rgba(30,132,73,.10);
+    border: 2px solid #27ae60;
+    color: #145a32;
+}
+.v6-conn-ok .v6-dot { color: #27ae60; }
+.v6-conn-fail {
+    background: rgba(192,57,43,.08);
+    border: 2px solid #c0392b;
+    color: #922b21;
+}
+.v6-conn-fail .v6-dot { color: #c0392b; }
+.v6-latency {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 400;
+    opacity: 0.75;
+    margin-top: 2px;
+}
 
-/* Sidebar educational level & institution info */
-section[data-testid="stSidebar"] .stSelectbox,
-section[data-testid="stSidebar"] .stTextInput {
+/* ── Sidebar selects: touch-optimised minimum heights ── */
+section[data-testid="stSidebar"] .stSelectbox > div,
+section[data-testid="stSidebar"] .stSelectbox select {
+    min-height: 2.8rem !important;
+    font-size: 1rem !important;
+    width: 100% !important;
+}
+section[data-testid="stSidebar"] .stTextInput input {
+    min-height: 2.8rem !important;
+    font-size: 1rem !important;
     width: 100% !important;
 }
 section[data-testid="stSidebar"] [data-testid="column"] {
@@ -2190,7 +2411,36 @@ section[data-testid="stSidebar"] [data-testid="column"] {
     flex: 1 1 80px !important;
 }
 
-/* Result boxes: ensure LTR content switches direction */
+/* ── Mic recorder: full width, visible on small screens ── */
+section[data-testid="stSidebar"] .stAudio,
+section[data-testid="stSidebar"] audio {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+/* ── Download grid: 2-col on mobile, 4-col on desktop ── */
+.donia-download-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 0.45rem;
+    margin: 0.5rem 0;
+}
+.donia-download-grid > * { min-width: 0; }
+@media (max-width: 480px) {
+    .donia-download-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* ── 4-column download matrix ── */
+@media (max-width: 640px) {
+    [data-testid="column"] { min-width: 45% !important; }
+}
+@media (max-width: 400px) {
+    [data-testid="column"] { min-width: 100% !important; }
+}
+
+/* ── Result boxes ── */
 .result-box-ltr {
     background: #f9f9f9;
     border: 1px solid rgba(30,132,73,.3);
@@ -2204,15 +2454,7 @@ section[data-testid="stSidebar"] [data-testid="column"] {
     font-family: 'Montserrat', 'Segoe UI', sans-serif;
 }
 
-/* 4-column download matrix — collapses to 2 on mobile */
-@media (max-width: 640px) {
-    [data-testid="column"] { min-width: 45% !important; }
-}
-@media (max-width: 400px) {
-    [data-testid="column"] { min-width: 100% !important; }
-}
-
-/* RAG preview text area */
+/* ── RAG preview ── */
 .rag-preview-box {
     direction: rtl;
     text-align: right;
@@ -2228,6 +2470,24 @@ section[data-testid="stSidebar"] [data-testid="column"] {
     word-break: break-word;
     overflow-x: auto;
 }
+
+/* ── v6.0 Health Badge ── */
+.v6-health-bar {
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin: 0.3rem 0 0.6rem;
+}
+.v6-health-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+.v6-health-dot.ok   { background: #27ae60; box-shadow: 0 0 6px #27ae60; }
+.v6-health-dot.fail { background: #c0392b; box-shadow: 0 0 6px #c0392b; }
+.v6-health-dot.warn { background: #f39c12; box-shadow: 0 0 6px #f39c12; }
 section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
 
 .stTabs [data-baseweb="tab"]{direction:rtl;font-size:.9rem;font-weight:700;color:#145a32}
@@ -2314,7 +2574,7 @@ section[data-testid="stSidebar"] .stMarkdown{text-align:right;color:#145a32}
 with st.sidebar:
     _logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_donia.jpg")
     if os.path.isfile(_logo_path):
-        st.image(_logo_path, width=220, caption="DONIA LABS TECH v5.0")
+        st.image(_logo_path, width=220, caption="DONIA LABS TECH v6.0")
 
     try:
         import qrcode
@@ -2332,53 +2592,119 @@ with st.sidebar:
 
     st.markdown("## ⚙️ الإعدادات العامة")
 
+    # ── v6.0: Cached health check — non-blocking, runs once per session ──
     st.markdown("### 🔌 حالة الاتصال")
-    col1, col2 = st.columns(2)
-    with col1:
-        if GROQ_API_KEY:
-            st.markdown('<div class="success-box" style="text-align:center">✅ Groq: متصل</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="error-box" style="text-align:center">❌ Groq: غير متصل</div>', unsafe_allow_html=True)
-    with col2:
-        arcee_connected = test_arcee_connection()
-        if arcee_connected:
-            st.markdown('<div class="success-box" style="text-align:center">✅ Arcee: متصل</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="error-box" style="text-align:center">❌ Arcee: غير متصل</div>', unsafe_allow_html=True)
+    _conn = get_connection_status()
+    _g  = _conn["groq"];  _a = _conn["arcee"]
 
+    # Build HTML cards for a fluid flex row that never overflows on mobile
+    def _conn_card(label: str, info: dict) -> str:
+        ok  = info["ok"]
+        cls = "v6-conn-ok" if ok else "v6-conn-fail"
+        dot = "✅" if ok else "❌"
+        lat = f'<span class="v6-latency">{info["latency_ms"]} ms</span>' if info.get("latency_ms") else ""
+        msg = info.get("msg", "")
+        return (f'''<div class="v6-conn-card {cls}">'''
+                f'''<span class="v6-dot">{dot}</span> {label}<br>'''
+                f'''<small>{msg}</small>{lat}</div>''')
+
+    st.markdown(
+        f'''<div class="v6-conn-row">
+            {_conn_card("Groq",  _g)}
+            {_conn_card("Arcee", _a)}
+        </div>''',
+        unsafe_allow_html=True,
+    )
+    # Keep backward compat for code that checks arcee_connected
+    arcee_connected = _a["ok"]
+
+    # ── v6.0: Mic recorder with graceful fallback ──
     st.markdown("### 🎤 إدخال صوتي")
     if MIC_AVAILABLE:
-        _mic_result = mic_recorder(start_prompt="🎙️ اضغط للتسجيل", stop_prompt="⏹️ إيقاف", key="mic_recorder")
+        # wrap in container so it takes full width on mobile
+        with st.container():
+            _mic_result = mic_recorder(
+                start_prompt="🎙️ اضغط للتسجيل",
+                stop_prompt="⏹️ إيقاف التسجيل",
+                key="mic_recorder",
+                use_container_width=True if hasattr(mic_recorder, '__code__') else False,
+            )
         audio_bytes = _mic_result.get("bytes") if isinstance(_mic_result, dict) else _mic_result
         if audio_bytes:
-            with st.spinner("جاري تحويل الصوت إلى نص..."):
+            with st.spinner("🔊 جاري التحويل إلى نص..."):
                 transcribed = audio_to_text(audio_bytes)
                 if transcribed:
-                    st.success(f"تم التعرف: {transcribed[:100]}...")
+                    st.success(f"✅ تم التعرف: *{transcribed[:120]}*")
+                    _store("voice_text", transcribed)
                     st.session_state["voice_text"] = transcribed
-                    st.info("يمكنك استخدام هذا النص في أي حقل إدخال أدناه.")
+                    st.caption("💡 النص متاح في جميع حقول الإدخال أدناه.")
                 else:
-                    st.error("لم يتم التعرف على الصوت. تأكد من وضوح التسجيل.")
+                    st.error("❌ لم يُتعرف على الصوت — حاول مرة أخرى بصوت أوضح.")
     else:
-        st.warning("⚠️ streamlit-mic-recorder غير مثبت.")
+        st.info("🎙️ لتفعيل الإدخال الصوتي، أضف `streamlit-mic-recorder` إلى requirements.txt")
 
     enable_web_search = st.checkbox("🌐 تمكين البحث عبر الإنترنت (Tavily)", value=False, key="global_web_search")
     if enable_web_search and not TAVILY_API_KEY:
         st.error("مفتاح Tavily غير موجود. أضف TAVILY_API_KEY في secrets.")
 
-    level = st.selectbox("🏫 الطور التعليمي", list(CURRICULUM.keys()))
-    info = CURRICULUM[level]
-    grade = st.selectbox("📚 المستوى", info["grades"])
+    # ── v6.0: Persistent level/grade/subject selection ──
+    # Use session_state keys so selections survive reruns without jumping
+    st.markdown("### 🏫 الطور التعليمي")
+    _levels = list(CURRICULUM.keys())
+    level = st.selectbox(
+        "الطور",
+        _levels,
+        key="v6_level",
+        label_visibility="collapsed",
+    )
+    info  = CURRICULUM[level]
+
+    st.markdown("### 📚 المستوى")
+    grade = st.selectbox(
+        "المستوى",
+        info["grades"],
+        key="v6_grade",
+        label_visibility="collapsed",
+    )
+
     branch = None
     if info["branches"] and grade in info["branches"]:
-        branch = st.selectbox("🎯 الشعبة", list(info["branches"][grade].keys()))
+        st.markdown("### 🎯 الشعبة")
+        branch = st.selectbox(
+            "الشعبة",
+            list(info["branches"][grade].keys()),
+            key="v6_branch",
+            label_visibility="collapsed",
+        )
+
     if info["subjects"]:
         subj_list = info["subjects"].get(grade) or info["subjects"].get("_default", [])
     elif info["branches"] and grade in info["branches"] and branch:
         subj_list = info["branches"][grade][branch]
     else:
         subj_list = []
-    subject = (st.selectbox("📖 المادة", subj_list) if subj_list else st.text_input("📖 المادة", key="sb_subject"))
+
+    st.markdown("### 📖 المادة")
+    if subj_list:
+        subject = st.selectbox(
+            "المادة",
+            subj_list,
+            key="v6_subject",
+            label_visibility="collapsed",
+        )
+    else:
+        subject = st.text_input("📖 المادة", key="sb_subject")
+
+    # ── v6.0: Compact context badge ──
+    if level and grade and subject:
+        _badge_txt = f"{level} · {grade} · {subject}"
+        st.markdown(
+            f'''<div style="background:linear-gradient(90deg,#145a32,#1e8449);
+            color:#fff;padding:.35rem .75rem;border-radius:20px;font-size:.8rem;
+            font-weight:700;text-align:center;margin:.4rem 0;direction:rtl;">
+            📌 {_badge_txt}</div>''',
+            unsafe_allow_html=True,
+        )
 
     st.markdown("---")
     st.markdown("**🏫 معلومات المؤسسة**")
@@ -2412,7 +2738,7 @@ st.markdown("""
 
 st.markdown(f"""
 <div class="title-card">
-    <h1 style="color:#ffffff!important;font-family:'Cairo',sans-serif">🎓 DONIA MIND — المعلم الذكي v5.0</h1>
+    <h1 style="color:#ffffff!important;font-family:'Cairo',sans-serif">🎓 DONIA MIND — المعلم الذكي v6.0</h1>
     <div class="donia-robot-wrap" aria-hidden="true">
       <div class="donia-robot" title="مساعدك التربوي الذكي">
         <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
