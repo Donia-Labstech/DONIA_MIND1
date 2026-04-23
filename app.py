@@ -2647,55 +2647,77 @@ with st.sidebar:
     if enable_web_search and not TAVILY_API_KEY:
         st.error("مفتاح Tavily غير موجود. أضف TAVILY_API_KEY في secrets.")
 
-    # ── v6.0: Persistent level/grade/subject selection ──
-    # Use session_state keys so selections survive reruns without jumping
-    st.markdown("### 🏫 الطور التعليمي")
+    # ── v6.0: Safe level/grade/subject selection ──
+    # Validates stale session_state values before use to prevent KeyError.
     _levels = list(CURRICULUM.keys())
+
+    # Reset stale v6_level if it no longer exists in CURRICULUM
+    if st.session_state.get("v6_level") not in _levels:
+        st.session_state["v6_level"] = _levels[0]
+
+    st.markdown("### 🏫 الطور التعليمي")
     level = st.selectbox(
         "الطور",
         _levels,
+        index=_levels.index(st.session_state["v6_level"]),
         key="v6_level",
         label_visibility="collapsed",
     )
-    info  = CURRICULUM[level]
+    # Safe CURRICULUM lookup — fallback to first key if anything goes wrong
+    info = CURRICULUM.get(level) or CURRICULUM[_levels[0]]
+
+    # Reset stale v6_grade if it no longer belongs to this level
+    if st.session_state.get("v6_grade") not in info["grades"]:
+        st.session_state["v6_grade"] = info["grades"][0]
 
     st.markdown("### 📚 المستوى")
     grade = st.selectbox(
         "المستوى",
         info["grades"],
+        index=info["grades"].index(st.session_state["v6_grade"]),
         key="v6_grade",
         label_visibility="collapsed",
     )
 
     branch = None
     if info["branches"] and grade in info["branches"]:
+        _branch_keys = list(info["branches"][grade].keys())
+        # Reset stale branch
+        if st.session_state.get("v6_branch") not in _branch_keys:
+            st.session_state["v6_branch"] = _branch_keys[0]
         st.markdown("### 🎯 الشعبة")
         branch = st.selectbox(
             "الشعبة",
-            list(info["branches"][grade].keys()),
+            _branch_keys,
+            index=_branch_keys.index(st.session_state["v6_branch"]),
             key="v6_branch",
             label_visibility="collapsed",
         )
 
+    # Build subject list
     if info["subjects"]:
         subj_list = info["subjects"].get(grade) or info["subjects"].get("_default", [])
     elif info["branches"] and grade in info["branches"] and branch:
-        subj_list = info["branches"][grade][branch]
+        subj_list = info["branches"][grade].get(branch, [])
     else:
         subj_list = []
 
     st.markdown("### 📖 المادة")
     if subj_list:
+        # Reset stale subject
+        if st.session_state.get("v6_subject") not in subj_list:
+            st.session_state["v6_subject"] = subj_list[0]
         subject = st.selectbox(
             "المادة",
             subj_list,
+            index=subj_list.index(st.session_state["v6_subject"]),
             key="v6_subject",
             label_visibility="collapsed",
         )
     else:
         subject = st.text_input("📖 المادة", key="sb_subject")
 
-    # ── v6.0: Compact context badge ──
+    # ── v6.0: Context badge ──
     if level and grade and subject:
         _badge_txt = f"{level} · {grade} · {subject}"
         st.markdown(
