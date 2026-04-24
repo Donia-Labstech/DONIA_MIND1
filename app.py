@@ -3856,29 +3856,61 @@ with tab_correct:
                                        placeholder="أدخل السؤال أو الحل النموذجي…")
         if correct_mode == "📷 صورة ورقة (كاميرا أو ملف)":
             st.markdown("**معاينة الصورة قبل المعالجة**")
-            img_col1, img_col2 = st.columns(2)
-            with img_col1:
-                try:
-                    cam_shot = st.camera_input("📷 الكاميرا المباشرة", key="corr_camera")
-                except Exception as cam_err:
-                    st.error(f"⚠️ تعذر الوصول إلى الكاميرا: {cam_err}.")
-                    cam_shot = None
-            with img_col2:
-                up_img = st.file_uploader("📁 رفع صورة",
-                                           type=["png", "jpg", "jpeg", "webp"],
-                                           key="corr_file_img")
+
+            # ── v6.0: Camera ON-DEMAND — never activates automatically ──
+            # User must press the button first to avoid auto-start on page load
+            _src_choice = st.radio(
+                "مصدر الصورة:",
+                ["📁 رفع ملف (موصى به)", "📷 الكاميرا المباشرة"],
+                horizontal=True, key="corr_img_src"
+            )
+
+            cam_shot   = None
+            up_img     = None
             preview_bytes = None
-            if cam_shot is not None:
-                preview_bytes = cam_shot.getvalue()
-                st.image(cam_shot, caption="معاينة — الكاميرا", use_container_width=True)
-            elif up_img is not None:
-                preview_bytes = up_img.read()
-                st.image(preview_bytes, caption="معاينة — الملف", use_container_width=True)
-            if preview_bytes and st.button("🔍 استخراج النص من الصورة (OCR)", key="btn_ocr"):
+
+            if _src_choice == "📁 رفع ملف (موصى به)":
+                up_img = st.file_uploader(
+                    "اختر صورة الورقة",
+                    type=["png", "jpg", "jpeg", "webp"],
+                    key="corr_file_img",
+                    help="JPG/PNG — حجم أقصى 10 ميجابايت"
+                )
+                if up_img is not None:
+                    preview_bytes = up_img.read()
+                    st.image(preview_bytes, caption="معاينة الورقة", use_container_width=True)
+            else:
+                # Camera is shown ONLY when the user explicitly chose it
+                st.info("💡 ستفتح الكاميرا عند الضغط على الزر أدناه.")
+                if st.button("📷 فتح الكاميرا", key="btn_open_cam_corr"):
+                    st.session_state["corr_cam_open"] = True
+
+                if st.session_state.get("corr_cam_open"):
+                    col_cam, col_close = st.columns([5, 1])
+                    with col_close:
+                        if st.button("✖ إغلاق", key="btn_close_cam_corr"):
+                            st.session_state["corr_cam_open"] = False
+                            st.rerun()
+                    with col_cam:
+                        try:
+                            cam_shot = st.camera_input(
+                                "التقط صورة الورقة ثم اضغط ✖ لإغلاق الكاميرا",
+                                key="corr_camera"
+                            )
+                        except Exception as cam_err:
+                            st.error(f"⚠️ تعذر الوصول للكاميرا: {cam_err}")
+                            cam_shot = None
+                    if cam_shot is not None:
+                        preview_bytes = cam_shot.getvalue()
+                        st.image(cam_shot, caption="✅ تم التقاط الصورة", use_container_width=True)
+                        # Auto-close camera after capture
+                        st.session_state["corr_cam_open"] = False
+
+            if preview_bytes and st.button("🔍 استخراج النص (OCR)", key="btn_ocr"):
                 ocr_extra = ocr_answer_sheet_image(preview_bytes)
                 if ocr_extra.strip():
                     st.session_state["corr_student_ans"] = ocr_extra
-                    st.success("✅ تم استخراج نص — يمكنك تعديله أدناه.")
+                    st.success("✅ تم استخراج النص — راجعه وعدّله أدناه.")
                     st.rerun()
                 else:
                     st.warning("⚠️ لم يُستخرج نص. انسخ النص يدوياً.")
@@ -3974,24 +4006,51 @@ with tab_correct:
                                    placeholder="إذا تركته فارغاً سيستنبط Gemini السؤال من الصورة…")
 
         st.markdown("**📸 صورة ورقة الطالب:**")
-        gv_img_col1, gv_img_col2 = st.columns(2)
-        with gv_img_col1:
-            try:
-                gv_cam = st.camera_input("📷 كاميرا مباشرة", key="gv_camera")
-            except Exception:
-                gv_cam = None
-        with gv_img_col2:
-            gv_upload = st.file_uploader("📁 أو رفع صورة",
-                                          type=["jpg", "jpeg", "png", "webp"],
-                                          key="gv_upload")
 
-        gv_bytes = None
-        if gv_cam is not None:
-            gv_bytes = gv_cam.getvalue()
-            st.image(gv_bytes, caption="معاينة — الكاميرا", use_container_width=True)
-        elif gv_upload is not None:
-            gv_bytes = gv_upload.read()
-            st.image(gv_bytes, caption="معاينة — الملف", use_container_width=True)
+        # ── v6.0: Camera ON-DEMAND for Gemini Vision ──
+        _gv_src = st.radio(
+            "مصدر الصورة:",
+            ["📁 رفع ملف (موصى به)", "📷 الكاميرا المباشرة"],
+            horizontal=True, key="gv_img_src"
+        )
+
+        gv_cam    = None
+        gv_upload = None
+        gv_bytes  = None
+
+        if _gv_src == "📁 رفع ملف (موصى به)":
+            gv_upload = st.file_uploader(
+                "اختر صورة الورقة للتصحيح",
+                type=["jpg", "jpeg", "png", "webp"],
+                key="gv_upload",
+                help="صور واضحة وعالية الدقة تعطي نتائج أفضل مع Gemini Vision"
+            )
+            if gv_upload is not None:
+                gv_bytes = gv_upload.read()
+                st.image(gv_bytes, caption="✅ معاينة الورقة", use_container_width=True)
+        else:
+            st.info("💡 اضغط الزر لفتح الكاميرا — تُغلق تلقائياً بعد الالتقاط.")
+            if st.button("📷 فتح الكاميرا", key="btn_open_gv_cam"):
+                st.session_state["gv_cam_open"] = True
+
+            if st.session_state.get("gv_cam_open"):
+                gv_close_col, gv_cam_col = st.columns([1, 5])
+                with gv_close_col:
+                    if st.button("✖", key="btn_close_gv_cam"):
+                        st.session_state["gv_cam_open"] = False
+                        st.rerun()
+                with gv_cam_col:
+                    try:
+                        gv_cam = st.camera_input(
+                            "التقط صورة الورقة",
+                            key="gv_camera"
+                        )
+                    except Exception:
+                        gv_cam = None
+                if gv_cam is not None:
+                    gv_bytes = gv_cam.getvalue()
+                    st.image(gv_bytes, caption="✅ تم التقاط الصورة", use_container_width=True)
+                    st.session_state["gv_cam_open"] = False
 
         if gv_bytes:
             if st.button("🚀 بدء التصحيح البصري (Gemini Vision)", key="btn_gemini_grade",
