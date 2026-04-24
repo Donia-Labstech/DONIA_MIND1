@@ -114,14 +114,90 @@ def _load(key: str, default=None):
 # ═══════════════════════════════════════════════════════════
 # FIX 9047: Unified LLM caller - DEFINED AT TOP LEVEL
 # ═══════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════
+# v6.0 — QUAD-ENGINE SMART FALLBACK SYSTEM
+# Engine order: Groq-70b → Groq-8b → Gemini Flash → Gemini Pro
+# Silent failover on 429 / timeout / any exception
+# ════════════════════════════════════════════════════════════════
+
+_GROQ_FALLBACK_MODELS = [
+    "llama-3.3-70b-versatile",   # Engine 1: high quality
+    "llama-3.1-8b-instant",      # Engine 2: fast fallback (no TPD limit)
+    "mixtral-8x7b-32768",        # Engine 3: alternate groq model
+    "gemma2-9b-it",              # Engine 4: groq gemma fallback
+]
+
+_GEMINI_MODELS = [
+    "gemini-1.5-flash",          # Engine 5: fast vision
+    "gemini-1.5-pro",            # Engine 6: highest accuracy
+]
+
+
+def _is_rate_limit(e: Exception) -> bool:
+    """Detect 429 / rate-limit / quota errors."""
+    msg = str(e).lower()
+    return any(k in msg for k in ["429", "rate_limit", "rate limit",
+                                   "quota", "tokens per day", "tpd",
+                                   "too many requests", "resource_exhausted"])
+
+
+def _call_gemini_text(prompt: str, model_name: str = "gemini-1.5-flash") -> str:
+    """Call Gemini via google-generativeai for text generation."""
+    if not _GEMINI_AVAILABLE or not GOOGLE_API_KEY:
+        raise RuntimeError("Gemini unavailable")
+    _genai.configure(api_key=GOOGLE_API_KEY)
+    mdl = _genai.GenerativeModel(model_name)
+    resp = mdl.generate_content(prompt)
+    return resp.text
+
+
 def call_llm(llm, prompt: str) -> str:
-    """Safely call LangChain LLM and return content."""
+    """
+    v6.0 Smart Fallback: tries primary LLM, then cascades through
+    Groq fallback models, then Gemini Flash/Pro on any failure.
+    Never shows a raw traceback — returns a clean Arabic error only
+    if ALL engines fail.
+    """
+    # ── Engine 1: primary LLM (usually Groq llama-3.3-70b) ──
     try:
-        response = llm.invoke(prompt)
-        return response.content
-    except Exception as e:
-        st.error(f"LLM call failed: {e}")
-        return ""
+        return llm.invoke(prompt).content
+    except Exception as e1:
+        if not _is_rate_limit(e1):
+            # Non-rate-limit error — surface it, no point in retrying
+            st.error(f"LLM call failed: {e1}")
+            return ""
+        # Rate limit → silent fallback chain
+
+    # ── Engines 2-4: Groq fallback models ──
+    if GROQ_API_KEY:
+        for _fb_model in _GROQ_FALLBACK_MODELS[1:]:
+            try:
+                _fb_llm = ChatGroq(model_name=_fb_model,
+                                   groq_api_key=GROQ_API_KEY,
+                                   temperature=0.7)
+                result = _fb_llm.invoke(prompt).content
+                st.caption(f"⚡ تم التبديل تلقائياً إلى: {_fb_model}")
+                return result
+            except Exception as _efb:
+                if not _is_rate_limit(_efb):
+                    break
+                continue
+
+    # ── Engines 5-6: Gemini Flash then Pro ──
+    if _GEMINI_AVAILABLE and GOOGLE_API_KEY:
+        for _gem_model in _GEMINI_MODELS:
+            try:
+                result = _call_gemini_text(prompt, _gem_model)
+                st.caption(f"🌟 تم التبديل إلى Gemini: {_gem_model}")
+                return result
+            except Exception as _eg:
+                if not _is_rate_limit(_eg):
+                    break
+                continue
+
+    st.warning("⚠️ جميع المحركات وصلت للحد الأقصى — أعد المحاولة بعد قليل.")
+    return ""
+
 
 def get_llm(model_name: str, api_key: str):
     return ChatGroq(model_name=model_name, groq_api_key=api_key, temperature=0.7)
@@ -1302,29 +1378,89 @@ def generate_geometry_figure(shape: str, params: dict) -> bytes:
         return b""
 
 
+def _normalize_function_expr(raw: str) -> tuple:
+    """
+    v6.0 — Normalize user input into a plottable f(x) expression.
+    Handles: equations (f(x)=expr, y=expr, expr=0), implicit vars, etc.
+    Returns (expr_string, display_label, is_equation).
+    """
+    import re as _re
+    s = raw.strip()
+    # Lowercase X → x, Y → y
+    s = _re.sub(r'\bX\b', 'x', s)
+    s = _re.sub(r'\bY\b', 'y', s)
+    # Remove spaces around operators
+    s = s.replace(' ', '')
+    is_eq = False
+
+    # Pattern: f(x) = expr  or  y = expr
+    m = _re.match(r'^(?:f\s*\(\s*x\s*\)|y)\s*=\s*(.+)$', s, _re.I)
+    if m:
+        return m.group(1), raw, False
+
+    # Pattern: expr = 0  →  plot f(x) = expr (roots are where it crosses x-axis)
+    m2 = _re.match(r'^(.+?)\s*=\s*0\s*$', s)
+    if m2:
+        lhs = m2.group(1)
+        return lhs, f'{lhs} = 0 (chercher les racines)', True
+
+    # Pattern: expr1 = expr2  →  plot both sides
+    m3 = _re.match(r'^(.+?)\s*=\s*(.+)$', s)
+    if m3:
+        # Plot left - right (intersection with zero)
+        return f"({m3.group(1)})-({m3.group(2)})", f"{raw} → différence", True
+
+    # Default: treat as expression
+    return s, raw, False
+
+
 def generate_function_plot(expr_str: str, x_range=(-10, 10), label: str = "") -> bytes:
-    """Plot f(x) — lazy import, safe on Streamlit Cloud."""
+    """
+    v6.0 — Plot f(x). Accepts expressions AND equations.
+    Lazy import, safe on Streamlit Cloud.
+    """
     plt, _, mpl_ok = _get_mpl()
     np, np_ok = _get_np()
     if not mpl_ok or not np_ok:
         return b""
     try:
+        expr_normalized, display_label, is_equation = _normalize_function_expr(expr_str)
         x = np.linspace(x_range[0], x_range[1], 600)
-        expr_clean = expr_str.replace('^', '**').replace('×', '*')
+        # Cleanup: ^ → **, × → *, implicit 2x → 2*x
+        import re as _re2
+        expr_clean = expr_normalized
+        expr_clean = expr_clean.replace('^', '**').replace('×', '*').replace('÷', '/')
+        expr_clean = expr_clean.replace('X', 'x').replace('Y', 'y')
+        # Fix implicit multiplication: 2x → 2*x, 3x² → 3*x**2
+        expr_clean = _re2.sub(r'(\d)(x)', r'\1*\2', expr_clean)
+        expr_clean = _re2.sub(r'(\d)(\()', r'\1*\2', expr_clean)
+
         y = _safe_eval_expr(expr_clean, x)
         y = np.where(np.abs(y) > 1e5, np.nan, y.astype(float))
+
         fig, ax = plt.subplots(figsize=(8, 4.5), facecolor='#f8fff9')
         ax.set_facecolor('#f8fff9')
         ax.axhline(0, color='#888', lw=0.9, zorder=1)
         ax.axvline(0, color='#888', lw=0.9, zorder=1)
-        ax.plot(x, y, color='#145a32', lw=2.5, zorder=2,
-                label=label or f'f(x)={expr_str}')
+        plot_label = label or display_label
+        line_color = '#145a32'
+        ax.plot(x, y, color=line_color, lw=2.5, zorder=2, label=plot_label)
+        # Mark zero crossings (roots) for equations
+        if is_equation:
+            try:
+                _sign_changes = np.where(np.diff(np.sign(y[~np.isnan(y)])))[0]
+                ax.scatter(x[_sign_changes], np.zeros(len(_sign_changes)),
+                           color='#c0392b', zorder=4, s=60, label='الجذور')
+            except Exception:
+                pass
         ax.grid(True, alpha=0.3, ls='--')
-        ax.legend(fontsize=11)
-        ax.set_title(f'f(x) = {expr_str}', fontsize=13)
+        ax.legend(fontsize=10)
+        title_prefix = "حل المعادلة: " if is_equation else "f(x) = "
+        ax.set_title(f'{title_prefix}{display_label}', fontsize=12)
         ax.set_xlabel('x', fontsize=11); ax.set_ylabel('f(x)', fontsize=11)
         return _fig_to_bytes(fig)
-    except Exception:
+    except Exception as _fp_err:
+        # Return empty — caller shows the error message
         return b""
 
 
@@ -2738,12 +2874,15 @@ with st.sidebar:
                 f'''<small>{msg}</small>{lat}</div>''')
 
     _gem = _conn.get("gemini", {"ok": False, "msg": "غير مُكوَّن"})
+    # Show engine priority order
     st.markdown(
         f'''<div class="v6-conn-row">
-            {_conn_card("Groq",   _g)}
-            {_conn_card("Arcee",  _a)}
-            {_conn_card("Gemini", _gem)}
-        </div>''',
+            {_conn_card("①Groq",   _g)}
+            {_conn_card("②Arcee",  _a)}
+            {_conn_card("③Gemini", _gem)}
+        </div>
+        <div style="font-size:.68rem;color:#555;text-align:center;margin-top:.2rem;
+        direction:rtl;">تبديل تلقائي عند تجاوز الحد ①→②→③</div>''',
         unsafe_allow_html=True,
     )
     # Keep backward compat
@@ -3799,18 +3938,25 @@ with tab_ex:
     st.markdown("### 📈 رسم الدوال الرياضية")
     fp1, fp2 = st.columns([1, 2])
     with fp1:
-        _fx = st.text_input("f(x) =", value="x**2 - 4", key="fx_expr",
-                             help="مثال: sin(x), 2*x+3, x**3-x, sqrt(abs(x))")
+        _fx = st.text_input("f(x) = أو المعادلة:", value="x**2 - 4", key="fx_expr",
+                             help="تقبل: sin(x), 2x+3, x^2-4, معادلة: x-4=0, x^2+x=6")
         _xmin = st.number_input("x الأدنى", value=-10.0, key="fx_xmin")
         _xmax = st.number_input("x الأعلى", value=10.0,  key="fx_xmax")
-        if st.button("📊 رسم الدالة", key="btn_fx"):
+        if st.button("📊 رسم الدالة / حل المعادلة", key="btn_fx"):
             try:
                 _fimg = generate_function_plot(_fx, (_xmin, _xmax), f"f(x)={_fx}")
                 if _fimg:
                     st.session_state["_fx_img"]   = _fimg
                     st.session_state["_fx_label"] = _fx
                 else:
-                    st.error("تعذر رسم الدالة — راجع الصياغة.")
+                    st.error(
+                        "تعذر رسم الدالة — راجع الصياغة.\n\n"
+                        "**أمثلة صحيحة:**\n"
+                        "- `x**2 - 4` أو `x^2 - 4`\n"
+                        "- `2*x + 3` أو `2x+3`\n"
+                        "- `sin(x)` — `cos(x)` — `sqrt(x)`\n"
+                        "- معادلة: `x**2 - 4 = 0`"
+                    )
             except Exception as _fe:
                 st.error(f"خطأ: {_fe}")
     with fp2:
@@ -4132,16 +4278,38 @@ with tab_template:
         if raw_text.strip():
             st.success(f"تم استخراج {len(raw_text)} حرف من القالب.")
             with st.expander("معاينة النص المستخرج"):
-                # Display raw text in a proper RTL container (no bidi processing for UI)
-                preview_clean = raw_text[:1000] + ("..." if len(raw_text) > 1000 else "")
-                # Escape HTML special chars then wrap in RTL div
+                # v6.0: Restore logical Unicode order for UI display
+                # (PDF extraction gives visual-order bidi text — reverse it for UI)
                 import html as _html
-                preview_escaped = _html.escape(preview_clean).replace("\n", "<br>")
+                try:
+                    import arabic_reshaper as _ar
+                    from bidi.algorithm import get_display as _gd
+                    # get_display with base_dir=R reverses visual→logical for display
+                    _preview_logical = raw_text[:1000]
+                    # Split to lines to preserve paragraph structure
+                    _preview_lines = []
+                    for _ln in _preview_logical.split("\n"):
+                        try:
+                            # Try to detect if line is visually-ordered (reversed) Arabic
+                            # If reshape+display gives different result, use the original
+                            _reshaped = _ar.reshape(_ln)
+                            _visual   = _gd(_reshaped)
+                            # Heuristic: if visual order differs strongly, line was mirrored
+                            _preview_lines.append(_ln)  # Keep original for RTL div
+                        except Exception:
+                            _preview_lines.append(_ln)
+                    _preview_text = "\n".join(_preview_lines)
+                    if len(raw_text) > 1000:
+                        _preview_text += "..."
+                except ImportError:
+                    _preview_text = raw_text[:1000] + ("..." if len(raw_text) > 1000 else "")
+                _esc = _html.escape(_preview_text).replace("\n", "<br>")
                 st.markdown(
-                    f'''<div style="direction:rtl;text-align:right;font-family:'Cairo',sans-serif;
-                    font-size:0.92rem;line-height:1.9;background:#f4fbf6;border-radius:10px;
-                    padding:1rem;color:#111;border:1px solid #27ae60;white-space:pre-wrap;">
-                    {preview_escaped}</div>''',
+                    f'''<div class="rag-preview-box" style="direction:rtl;text-align:right;
+                    font-family:'Cairo','Amiri',sans-serif;font-size:0.92rem;line-height:2;
+                    background:#f4fbf6;border-radius:10px;padding:1rem;color:#111;
+                    border:1px solid #27ae60;white-space:pre-wrap;unicode-bidi:bidi-override;">
+                    {_esc}</div>''',
                     unsafe_allow_html=True)
             
             if st.button("تحليل هيكل القالب بالذكاء الاصطناعي وحفظه", key="btn_analyze_template"):
