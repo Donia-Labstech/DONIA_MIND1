@@ -269,6 +269,196 @@ def get_pdf_mode_for_subject(subject: str):
         return False, "French"
     return True, "Arabic"
 
+
+
+# ════════════════════════════════════════════════════════════════════════
+# v6.1 — TIKZ / LATEX VISUAL RENDERING PIPELINE
+# Converts raw TikZ code from LLM output to Matplotlib PNG images.
+# No external LaTeX compiler — pure Python rendering.
+# ════════════════════════════════════════════════════════════════════════
+
+_TIKZ_BLOCK_RE = re.compile(
+    r'\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}',
+    re.IGNORECASE
+)
+_DRAW_RE    = re.compile(r'\\draw(?:\[([^\]]*?)\])?\s*([^;]+?);', re.IGNORECASE)
+_FILLDRAW_RE= re.compile(r'\\filldraw(?:\[([^\]]*?)\])?\s*([^;]+?);', re.IGNORECASE)
+_NODE_RE    = re.compile(r'\\node(?:\[([^\]]*?)\])?(?:\s*at\s*([^{]+?))?\{([^}]*)\}', re.IGNORECASE)
+_COORD_RE   = re.compile(r'\((-?\d*\.?\d+),\s*(-?\d*\.?\d+)\)')
+
+_TIKZ_COLOR_MAP = {
+    "green": "#27ae60", "blue": "#2980b9", "red": "#c0392b",
+    "black": "#111111", "gray": "#888888", "orange": "#e67e22",
+    "purple": "#8e44ad", "yellow": "#f1c40f", "cyan": "#1abc9c",
+    "white": "#ffffff",
+}
+
+
+def _tikz_mpl_color(opts: str, default="#145a32") -> str:
+    if not opts:
+        return default
+    opts_lower = opts.lower()
+    for k, v in _TIKZ_COLOR_MAP.items():
+        if k in opts_lower:
+            return v
+    return default
+
+
+def _tikz_coords(path_str: str) -> list:
+    return [(float(m[0]), float(m[1])) for m in _COORD_RE.findall(path_str)]
+
+
+def tikz_to_image(full_tikz: str, fig_num: int = 1) -> bytes:
+    """Render a \\begin{tikzpicture}...\\end{tikzpicture} block as PNG bytes."""
+    plt_mod, mpat, ok = _get_mpl()
+    if not ok:
+        return b""
+    try:
+        fig, ax = plt_mod.subplots(figsize=(7, 6), facecolor="#f8fff9")
+        ax.set_aspect("equal")
+        ax.set_facecolor("#f8fff9")
+        ax.grid(True, alpha=0.25, color="#aaaaaa", ls="--", zorder=0)
+        ax.axhline(0, color="#888", lw=0.8, zorder=1)
+        ax.axvline(0, color="#888", lw=0.8, zorder=1)
+
+        # ── \draw paths ──
+        for m in _DRAW_RE.finditer(full_tikz):
+            opts = m.group(1) or ""
+            path = m.group(2)
+            coords = _tikz_coords(path)
+            color = _tikz_mpl_color(opts)
+            ls = "--" if "dashed" in opts.lower() else "-"
+            closed = "cycle" in path.lower()
+
+            # Circle detection
+            circ = re.search(r'circle\s*\(([\d.]+)\)', path)
+            if circ and coords:
+                cx, cy = coords[0]
+                r = float(circ.group(1))
+                c = plt_mod.Circle((cx, cy), r,
+                                   edgecolor=color, facecolor="none", lw=2)
+                ax.add_patch(c)
+            elif len(coords) >= 2:
+                xs = [c[0] for c in coords]
+                ys = [c[1] for c in coords]
+                if closed:
+                    xs.append(xs[0]); ys.append(ys[0])
+                ax.plot(xs, ys, color=color, lw=2, ls=ls, zorder=2)
+                # Arrow heads (stealth / ->)
+                if "->" in opts or "stealth" in opts.lower():
+                    ax.annotate("", xy=(xs[-1], ys[-1]), xytext=(xs[-2], ys[-2]),
+                                arrowprops=dict(arrowstyle="->", color=color, lw=1.5))
+
+        # ── \filldraw paths ──
+        for m in _FILLDRAW_RE.finditer(full_tikz):
+            opts = m.group(1) or ""
+            path = m.group(2)
+            coords = _tikz_coords(path)
+            ec = _tikz_mpl_color(opts, "#145a32")
+            fill_match = re.search(r'fill\s*=\s*(\w+)', opts.lower())
+            fc = _tikz_mpl_color(fill_match.group(1), "#d5f5e3") if fill_match else "#d5f5e3"
+            if len(coords) >= 3:
+                poly = plt_mod.Polygon(coords, closed=True,
+                                       edgecolor=ec, facecolor=fc, lw=2, alpha=0.85)
+                ax.add_patch(poly)
+            elif len(coords) == 1:
+                ax.scatter([coords[0][0]], [coords[0][1]],
+                           color=ec, s=80, zorder=3)
+
+        # ── \node labels ──
+        for m in _NODE_RE.finditer(full_tikz):
+            opts   = m.group(1) or ""
+            at_str = m.group(2) or ""
+            label  = m.group(3) or ""
+            coords = _tikz_coords(at_str)
+            if coords:
+                cx, cy = coords[0]
+                ha = "center"; va = "center"
+                if "right" in opts.lower(): ha = "left"
+                if "left"  in opts.lower(): ha = "right"
+                if "above" in opts.lower(): va = "bottom"
+                if "below" in opts.lower(): va = "top"
+                lbl = re.sub(r'\$([^$]*)\$', r'\1', label).strip()
+                lbl = re.sub(r'\\[a-zA-Z]+', '', lbl).strip()
+                if lbl:
+                    ax.text(cx, cy, lbl, ha=ha, va=va, fontsize=10,
+                            color="#1a1a1a",
+                            bbox=dict(boxstyle="round,pad=0.2",
+                                      fc="white", ec="none", alpha=0.8),
+                            zorder=4)
+
+        # Mark named points (dots at coords)
+        all_coords = _tikz_coords(full_tikz)
+        if all_coords:
+            xs_all = [c[0] for c in all_coords]
+            ys_all = [c[1] for c in all_coords]
+            x_rng = max(xs_all) - min(xs_all) if len(xs_all) > 1 else 2
+            y_rng = max(ys_all) - min(ys_all) if len(ys_all) > 1 else 2
+            margin = max(0.8, max(x_rng, y_rng) * 0.15)
+            ax.set_xlim(min(xs_all) - margin, max(xs_all) + margin)
+            ax.set_ylim(min(ys_all) - margin, max(ys_all) + margin)
+
+        ax.autoscale_view(tight=False)
+        ax.margins(0.12)
+        ax.set_title(f"شكل هندسي {fig_num}", fontsize=11, pad=5)
+        ax.set_xlabel("x", fontsize=10); ax.set_ylabel("y", fontsize=10)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", bbox_inches="tight",
+                    dpi=130, facecolor="#f8fff9")
+        plt_mod.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return b""
+
+
+def extract_render_tikz(text: str) -> str:
+    """
+    Find all TikZ blocks in AI output, render them as images via st.image(),
+    and return cleaned text with raw TikZ replaced by a placeholder label.
+    Must be called BEFORE displaying any AI text.
+    """
+    blocks = _TIKZ_BLOCK_RE.findall(text)
+    if not blocks:
+        return text
+
+    for i, inner in enumerate(blocks, 1):
+        full = r"\begin{tikzpicture}" + inner + r"\end{tikzpicture}"
+        img  = tikz_to_image(full, fig_num=i)
+        if img:
+            st.image(img,
+                     caption=f"الشكل الهندسي {i} — مُرسَم تلقائياً",
+                     use_container_width=True)
+        else:
+            st.info(f"📐 الشكل الهندسي {i}: تعذّر التصيير التلقائي. "
+                    "يمكن نسخ الكود إلى GeoGebra أو Desmos.")
+        text = text.replace(
+            full,
+            f"\n\n[▶ الشكل الهندسي {i} مُعروض أعلاه]\n\n", 1
+        )
+
+    return text
+
+
+def clean_raw_latex_envs(text: str) -> str:
+    """
+    Strip or neutralize unsupported raw LaTeX environments
+    (tikzpicture, pspicture, document, etc.) that have no visual renderer.
+    """
+    # TikZ already handled by extract_render_tikz — remove any residuals
+    text = re.sub(
+        r'\\begin\{(?:tikzpicture|pspicture|pgfpicture|picture)[\s\S]*?\\end\{(?:tikzpicture|pspicture|pgfpicture|picture)\}',
+        '[شكل هندسي — تمت معالجته]', text
+    )
+    # Remove document-level commands
+    text = re.sub(r'\\(?:usepackage|documentclass|begin\{document\}|end\{document\})[^\n]*\n?', '', text)
+    # Neutralize \tikz inline (outside environments)
+    text = re.sub(r'\\tikz\s*[^;]+;', '[رمز هندسي مدمج]', text)
+    return text
+
+
+
 # ═══════════════════════════════════════════════════════════
 # FIX R4: Robust FPDF2 with Arabic reshaping & font fallback
 # ═══════════════════════════════════════════════════════════
@@ -504,7 +694,31 @@ def ensure_font_files():
                     continue
 
 # ========== PDF GENERATORS ==========
+def _prepare_pdf_content(text: str) -> str:
+    """
+    v6.1: Clean AI output before PDF generation.
+    - Remove TikZ/LaTeX environments (cannot be embedded in FPDF2)
+    - Mark their positions for the teacher
+    """
+    # Remove TikZ environments — replace with a note
+    cleaned = re.sub(
+        r'\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}',
+        '\n[الشكل الهندسي — يُعرض في تطبيق DONIA MIND]\n',
+        text
+    )
+    # Remove other raw LaTeX environments
+    cleaned = re.sub(
+        r'\\(?:usepackage|documentclass|begin\{document\}|end\{document\})[^\n]*\n?',
+        '', cleaned
+    )
+    # Clean inline LaTeX that FPDF can't render — show as text
+    cleaned = re.sub(r'\$\$([^$]+)\$\$', r' [المعادلة: \1] ', cleaned)
+    cleaned = re.sub(r'\$([^$\n]+)\$', r' \1 ', cleaned)
+    return cleaned
+
+
 def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool = True) -> bytes:
+    content = _prepare_pdf_content(content)
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
@@ -551,6 +765,10 @@ def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool 
             return b""  # absolute last resort
 
 def generate_exam_pdf(exam_data: dict) -> bytes:
+    # Pre-process content: strip TikZ (figures shown in app, not PDF)
+    if "content" in exam_data:
+        exam_data = dict(exam_data)
+        exam_data["content"] = _prepare_pdf_content(exam_data["content"])
     ensure_font_files()
     pdf = ArabicFPDF()
     pdf.add_page()
@@ -1766,13 +1984,19 @@ def safe_f(val, fmt=".2f") -> str:
         return "—"
 
 def render_with_latex(text):
+    """v6.1: Renders TikZ, LaTeX math, and prose in correct order."""
+    # ── Extract TikZ blocks first ──
+    text = extract_render_tikz(text)
+    text = clean_raw_latex_envs(text)
     text = clean_latex(text)
     parts = re.split(r'(\$\$[\s\S]+?\$\$|\$[^\$\n]+?\$)', text)
     for part in parts:
         if part.startswith("$$") and part.endswith("$$"):
-            st.latex(part[2:-2].strip())
+            try: st.latex(part[2:-2].strip())
+            except: st.code(part, language="latex")
         elif part.startswith("$") and part.endswith("$"):
-            st.latex(part[1:-1].strip())
+            try: st.latex(part[1:-1].strip())
+            except: st.code(part, language="latex")
         elif part.strip():
             st.markdown(
                 f'<div style="direction:rtl;text-align:right;'
@@ -1937,22 +2161,38 @@ def get_subject_css_direction(subject: str) -> str:
 # Curriculum data
 
 def render_content_rtl_aware(text, subject):
-    """Render AI-generated content with direction based on subject language."""
+    """
+    v6.1 Render AI output with:
+    1. TikZ blocks → Matplotlib images (renders geometry visually)
+    2. Standard LaTeX math ($...$, $$...$$) → st.latex()
+    3. Arabic/Latin prose → RTL/LTR div with correct direction
+    """
     direction = get_subject_css_direction(subject)
     text_align = "right" if direction == "rtl" else "left"
     ff_rtl = "'Cairo','Tajawal',sans-serif"
     ff_ltr = "'Montserrat','Segoe UI',sans-serif"
     font_family = ff_rtl if direction == "rtl" else ff_ltr
+
+    # ── STEP 1: Extract and render TikZ geometry blocks ──
+    text = extract_render_tikz(text)
+    # ── STEP 2: Clean residual raw LaTeX environments ──
+    text = clean_raw_latex_envs(text)
+    # ── STEP 3: Standard LaTeX math preprocessing ──
     clean = clean_latex(text)
-    # Split on LaTeX: $$...$$ or $...$
-    import re as _re2
-    LATEX_PAT = _re2.compile(r'(\$\$[\s\S]+?\$\$|\$[^\$\n]+?\$)')
+
+    LATEX_PAT = re.compile(r'(\$\$[\s\S]+?\$\$|\$[^\$\n]+?\$)')
     parts = LATEX_PAT.split(clean)
     for part in parts:
         if part.startswith("$$") and part.endswith("$$"):
-            st.latex(part[2:-2].strip())
+            try:
+                st.latex(part[2:-2].strip())
+            except Exception:
+                st.code(part, language="latex")
         elif part.startswith("$") and part.endswith("$"):
-            st.latex(part[1:-1].strip())
+            try:
+                st.latex(part[1:-1].strip())
+            except Exception:
+                st.code(part, language="latex")
         elif part.strip():
             css = (
                 "direction:" + direction + ";"
@@ -1974,6 +2214,14 @@ def render_content_rtl_aware(text, subject):
 _V6_GRADING_SYSTEM_PROMPT = """
 Context: DONIA MIND V6 Educational Platform — Automated Grading Module.
 Standard: Zero-Error (0% Tolerance) Academic Policy — Algerian Curriculum.
+
+GEOMETRY OUTPUT RULE (CRITICAL):
+When describing geometric figures, DO NOT output raw \begin{tikzpicture} code.
+Instead, describe the figure using coordinate lists that the system can render:
+- For triangles: list the vertices as (x1,y1) -- (x2,y2) -- (x3,y3) -- cycle
+- For circles: center (cx,cy) radius r
+- For axes (le repère): draw arrows from (-n,0) to (n,0) and (0,-n) to (0,n)
+If you must use TikZ, keep it minimal — the system will render it automatically.
 
 <mission>
 Act as an elite pedagogical AI. Analyze mathematical/educational documents with:
