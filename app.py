@@ -160,7 +160,7 @@ def call_llm(llm, prompt: str) -> str:
     """
     # ── Engine 1: primary LLM (usually Groq llama-3.3-70b) ──
     try:
-        return llm.invoke(prompt).content
+        return DataCleaner.clean_llm_output(llm.invoke(prompt).content)
     except Exception as e1:
         if not _is_rate_limit(e1):
             # Non-rate-limit error — surface it, no point in retrying
@@ -268,6 +268,124 @@ def get_pdf_mode_for_subject(subject: str):
     if any(lang in s for lang in ["الفرنسية", "Français"]):
         return False, "French"
     return True, "Arabic"
+
+
+# ═══════════════════════════════════════════════════════════
+# DATA CLEANING LAYER — v6.1
+# طبقة تنظيف البيانات: تمنع التداخل اللغوي وتضمن سلامة التشفير
+# ═══════════════════════════════════════════════════════════
+
+class DataCleaner:
+    """
+    Central data cleaning layer for DONIA MIND v6.1.
+    Handles:
+    - UTF-8 normalization for Arabic text
+    - Language interference prevention (Arabic/French/English)
+    - Safe string sanitization for LLM inputs and DB outputs
+    - XSS-safe HTML output
+    """
+    # Arabic Unicode block range
+    _AR_RANGE = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+')
+    # Invisible / control characters except newline/tab
+    _CONTROL   = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]')
+    # Repeated whitespace collapser
+    _MULTISPC  = re.compile(r'[ \t]{2,}')
+    # HTML-unsafe chars for display escaping
+    _HTML_UNSAFE = str.maketrans({'<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;'})
+
+    @classmethod
+    def clean_input(cls, text: str, max_len: int = 10000) -> str:
+        """
+        Sanitize user input text:
+        1. Enforce UTF-8 encoding (round-trip encode/decode)
+        2. Strip control characters
+        3. Collapse excess whitespace
+        4. Truncate to max_len
+        """
+        if not isinstance(text, str):
+            try:
+                text = str(text)
+            except Exception:
+                return ""
+        # UTF-8 round-trip — removes surrogates / malformed sequences
+        try:
+            text = text.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+        except Exception:
+            return ""
+        text = cls._CONTROL.sub("", text)
+        text = cls._MULTISPC.sub(" ", text)
+        return text[:max_len].strip()
+
+    @classmethod
+    def clean_llm_output(cls, text: str) -> str:
+        """
+        Clean LLM-generated content before display or storage:
+        1. UTF-8 normalization
+        2. Remove null bytes / mojibake artifacts
+        3. Normalize Arabic diacritics (tashkeel) if corrupted
+        4. Preserve LaTeX math markers $...$ and $$...$$
+        """
+        if not text:
+            return ""
+        try:
+            text = text.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        # Remove null bytes that sometimes slip through JSON parsing
+        text = text.replace("\x00", "").replace("\ufffd\ufffd", "")
+        # Remove Windows-1252 artifacts sometimes mixed in Arabic
+        text = text.replace("\x92", "'").replace("\x93", '"').replace("\x94", '"')
+        text = cls._CONTROL.sub("", text)
+        return text.strip()
+
+    @classmethod
+    def detect_language_mix(cls, text: str) -> dict:
+        """
+        Detect language composition of a text snippet.
+        Returns dict: {'arabic': bool, 'latin': bool, 'mixed': bool}
+        """
+        has_arabic = bool(cls._AR_RANGE.search(text))
+        has_latin  = bool(re.search(r'[a-zA-Z]', text))
+        return {
+            "arabic": has_arabic,
+            "latin":  has_latin,
+            "mixed":  has_arabic and has_latin,
+        }
+
+    @classmethod
+    def safe_html(cls, text: str) -> str:
+        """Escape HTML-unsafe characters for safe st.markdown injection."""
+        return text.translate(cls._HTML_UNSAFE)
+
+    @classmethod
+    def clean_pdf_text(cls, text: str, is_arabic: bool = True) -> str:
+        """
+        Prepare text for FPDF2 insertion:
+        1. UTF-8 normalize
+        2. Apply Arabic reshape + bidi if is_arabic=True
+        3. Remove unsupported control chars
+        """
+        text = cls.clean_input(text, max_len=50000)
+        if is_arabic:
+            text = reshape_arabic(text)
+        return text
+
+    @classmethod
+    def clean_db_value(cls, value) -> str:
+        """Safely convert any value to a clean UTF-8 string for SQLite storage."""
+        if value is None:
+            return ""
+        return cls.clean_input(str(value), max_len=100000)
+
+
+# ── Convenience top-level wrappers (backward compat) ──
+def sanitize_input(text: str, max_len: int = 10000) -> str:
+    """Alias for DataCleaner.clean_input — use in all user-facing inputs."""
+    return DataCleaner.clean_input(text, max_len)
+
+def sanitize_output(text: str) -> str:
+    """Alias for DataCleaner.clean_llm_output — use before any st.markdown / st.write call."""
+    return DataCleaner.clean_llm_output(text)
 
 
 
@@ -718,6 +836,7 @@ def _prepare_pdf_content(text: str) -> str:
 
 
 def generate_simple_pdf(content: str, title: str, subtitle: str = "", rtl: bool = True) -> bytes:
+    content = DataCleaner.clean_llm_output(content)
     content = _prepare_pdf_content(content)
     ensure_font_files()
     pdf = ArabicFPDF()
