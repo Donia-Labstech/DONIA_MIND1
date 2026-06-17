@@ -1,11 +1,29 @@
 # ══════════════════════════════════════════════════════════
 # DONIA MIND v6.0 — requirements.txt
+# v2 — Python 3.14 compatibility fix (2026-06-17)
+#
+# WHY THESE EXACT VERSIONS: Streamlit Cloud's current runtime is
+# Python 3.14.6. The previous pins (Pillow 10.4.0, pandas 2.2.3,
+# numpy 1.26.4, matplotlib 3.9.3, python-bidi 0.6.3) have NO
+# precompiled wheel for Python 3.14 ("cp314") on PyPI, so pip/uv
+# tried to compile them from source — which then failed because
+# build tools (zlib headers, etc.) aren't available in that build
+# step. Every version below was checked against PyPI's actual file
+# listing to confirm a cp314 manylinux x86_64 wheel exists, so no
+# source compilation is needed at all.
+#
 # Verified by actually installing this exact file into a clean
-# virtualenv on 2026-06-17 — zero dependency conflicts.
+# virtualenv on 2026-06-17 — zero dependency conflicts — and by
+# running the full app.py module end-to-end in that environment
+# with zero exceptions.
 # ══════════════════════════════════════════════════════════
 
 # --- Core framework ---
-streamlit==1.40.2
+# NOTE: upgraded from 1.40.2 → 1.58.0. This was REQUIRED, not optional:
+# streamlit 1.40.2 pins "pandas<3" and "pillow<12", which blocks using
+# the cp314-compatible pandas/Pillow versions below. 1.58.0 relaxes
+# those to "pandas<4" / "pillow<13".
+streamlit==1.58.0
 python-dotenv==1.0.1
 
 # --- LLM providers ---
@@ -13,51 +31,46 @@ langchain-groq==0.2.5
 google-generativeai==0.8.3
 
 # --- Data / charts ---
-pandas==2.2.3
+# pandas: 2.2.3 → 2.3.3 (stays in the 2.x line streamlit requires,
+# but 2.3.3 is the first 2.x release with a cp314 wheel)
+pandas==2.3.3
 plotly==5.24.1
-matplotlib==3.9.3
-numpy==1.26.4
+# matplotlib, numpy: straightforward upgrades, both have cp314 wheels.
+# App only uses basic/stable APIs (subplots, Circle, np.sin/cos/sqrt/etc.)
+# unaffected by numpy 2.0's breaking changes.
+matplotlib==3.11.0
+numpy==2.4.6
 
 # --- Images ---
-Pillow==10.4.0
+# Pillow: 10.4.0 → 12.1.1 (10.4.0 has no cp314 wheel, hence the
+# original deploy failure; 12.1.1 does)
+Pillow==12.1.1
 
 # --- Excel ---
 openpyxl==3.1.5
 
-# --- PDF generation + Arabic shaping (the core of the Arabic-export fix) ---
+# --- PDF generation + Arabic shaping ---
 fpdf2==2.8.1
 arabic-reshaper==3.0.1
-python-bidi==0.6.3
+# python-bidi: 0.6.3 → 0.6.10 (0.6.3 has no cp314 wheel). get_display()
+# API confirmed unchanged — re-tested full Arabic PDF render, identical
+# output to before.
+python-bidi==0.6.10
 
 # --- Word (DOCX) generation ---
 python-docx==1.1.2
 
-# --- QR codes (sidebar QR + certification center) ---
+# --- QR codes ---
 qrcode==8.0
 
 # --- HTTP ---
 requests==2.32.3
 
 # ══════════════════════════════════════════════════════════
-# OPTIONAL — app already wraps these in try/except ImportError,
-# so the app keeps running even if you skip installing some of these.
-# Uncomment the ones you actually use.
+# OPTIONAL — app already wraps these in try/except ImportError.
 # ══════════════════════════════════════════════════════════
-
-# Voice input in sidebar (🎤 إدخال صوتي)
 # streamlit-mic-recorder==0.0.8
-
-# Web search inside lesson/exam generation (🌐 تمكين البحث عبر الإنترنت)
 # tavily-python==0.7.26
-
-# OCR for scanned answer sheets
 # pytesseract==0.3.13
-# (pytesseract also requires the system Tesseract binary —
-#  add `tesseract-ocr` to packages.txt if you enable this)
-
-# PDF text extraction (importing existing PDFs as templates)
 # pdfplumber==0.11.10
-
-# Arcee critic/dual-LLM layer — package name varies by account type,
-# verify with Arcee directly before pinning a version.
 # arcee-py==2.0.1
