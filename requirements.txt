@@ -1,0 +1,63 @@
+# ══════════════════════════════════════════════════════════
+# DONIA MIND v6.0 — requirements.txt
+# Verified by actually installing this exact file into a clean
+# virtualenv on 2026-06-17 — zero dependency conflicts.
+# ══════════════════════════════════════════════════════════
+
+# --- Core framework ---
+streamlit==1.40.2
+python-dotenv==1.0.1
+
+# --- LLM providers ---
+langchain-groq==0.2.5
+google-generativeai==0.8.3
+
+# --- Data / charts ---
+pandas==2.2.3
+plotly==5.24.1
+matplotlib==3.9.3
+numpy==1.26.4
+
+# --- Images ---
+Pillow==10.4.0
+
+# --- Excel ---
+openpyxl==3.1.5
+
+# --- PDF generation + Arabic shaping (the core of the Arabic-export fix) ---
+fpdf2==2.8.1
+arabic-reshaper==3.0.1
+python-bidi==0.6.3
+
+# --- Word (DOCX) generation ---
+python-docx==1.1.2
+
+# --- QR codes (sidebar QR + certification center) ---
+qrcode==8.0
+
+# --- HTTP ---
+requests==2.32.3
+
+# ══════════════════════════════════════════════════════════
+# OPTIONAL — app already wraps these in try/except ImportError,
+# so the app keeps running even if you skip installing some of these.
+# Uncomment the ones you actually use.
+# ══════════════════════════════════════════════════════════
+
+# Voice input in sidebar (🎤 إدخال صوتي)
+# streamlit-mic-recorder==0.0.8
+
+# Web search inside lesson/exam generation (🌐 تمكين البحث عبر الإنترنت)
+# tavily-python==0.7.26
+
+# OCR for scanned answer sheets
+# pytesseract==0.3.13
+# (pytesseract also requires the system Tesseract binary —
+#  add `tesseract-ocr` to packages.txt if you enable this)
+
+# PDF text extraction (importing existing PDFs as templates)
+# pdfplumber==0.11.10
+
+# Arcee critic/dual-LLM layer — package name varies by account type,
+# verify with Arcee directly before pinning a version.
+# arcee-py==2.0.1
